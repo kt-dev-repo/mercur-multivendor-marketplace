@@ -1,0 +1,37 @@
+# Redis — standalone service for Mercur local development.
+# Independent lifecycle: start, stop, or upgrade without touching Postgres.
+#
+#   docker compose -f docker-compose.redis.yml up -d
+#   docker compose -f docker-compose.redis.yml ps
+#   docker compose -f docker-compose.redis.yml logs -f
+#   docker compose -f docker-compose.redis.yml down       # keep data
+#   docker compose -f docker-compose.redis.yml down -v    # DESTROY data
+#
+# Connection: redis://localhost:6379
+#
+# Mercur uses Redis for cache, event bus, workflow engine, and locking
+# (see apps/api/medusa-config.ts). Losing it drops in-flight workflow state,
+# so appendonly persistence is on.
+
+name: mercur-redis
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: mercur-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+volumes:
+  redisdata:
+    name: mercur-redisdata

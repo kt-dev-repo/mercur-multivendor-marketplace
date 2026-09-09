@@ -30,14 +30,47 @@ git remote set-url --push upstream DISABLED
 | Postgres | >= 13 | via Docker |
 | Redis | any | via Docker |
 
-## 2. Data stores **[pending]**
+## 2. Data stores **[done — running]**
+
+Postgres and Redis run as **two independent services**, one compose file each, so
+either can be stopped, upgraded, or wiped without touching the other.
 
 ```bash
-docker compose -f docker-compose.local.yml up -d
-docker compose -f docker-compose.local.yml ps        # both healthy
+docker compose -f docker-compose.postgres.yml up -d
+docker compose -f docker-compose.redis.yml    up -d
 ```
 
-`postgres://mercur:mercur@localhost:5432/mercur` · `redis://localhost:6379`
+Verified on 2026-09-09: `mercur-postgres` healthy (PostgreSQL 16.15),
+`mercur-redis` healthy (`PONG`). They register as two separate compose projects
+(`docker compose ls`).
+
+| Service | Container | URL | Volume |
+|---|---|---|---|
+| Postgres 16 | `mercur-postgres` | `postgres://mercur:mercur@localhost:5432/mercur` | `mercur-pgdata` |
+| Redis 7 | `mercur-redis` | `redis://localhost:6379` | `mercur-redisdata` |
+
+Per-service control:
+
+```bash
+docker compose -f docker-compose.redis.yml restart      # Redis only
+docker compose -f docker-compose.postgres.yml logs -f   # Postgres only
+docker compose -f docker-compose.postgres.yml down      # stop, keep data
+docker compose -f docker-compose.postgres.yml down -v   # DESTROY data
+```
+
+Credentials and ports are overridable without editing the files —
+`POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `POSTGRES_PORT`, `REDIS_PORT`.
+
+Redis holds the cache, event bus, workflow engine, and locking provider
+(`apps/api/medusa-config.ts`), so wiping it drops in-flight workflow state.
+Appendonly persistence is enabled to reduce that risk.
+
+### Using externally hosted services instead
+
+Nothing in the repo depends on these compose files. To use a managed or already
+running Postgres/Redis, skip this step and point `DATABASE_URL` and `REDIS_URL`
+in `apps/api/.env` at them. For a managed Postgres that enforces TLS, append
+`?ssl_mode=require`.
 
 ## 3. Environment files **[pending]**
 
@@ -123,6 +156,6 @@ added files and future `git merge upstream/main` cannot conflict.
 |---|---|
 | CORS error in a dashboard/storefront | port missing from the matching `*_CORS` in `apps/api/.env` |
 | Storefront empty | publishable key missing, or region ≠ `de` |
-| `db:migrate` connection refused | containers not up / not healthy |
+| `db:migrate` connection refused | `docker compose -f docker-compose.postgres.yml ps` — service down or unhealthy |
 | Duplicate `@medusajs/*` versions | root `overrides` pin 2.20.1 — never bump per-workspace |
 | Port already in use | `lsof -ti tcp:<port>` then kill |

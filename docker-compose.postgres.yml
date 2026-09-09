@@ -1,0 +1,36 @@
+# PostgreSQL — standalone service for Mercur local development.
+# Independent lifecycle: start, stop, or upgrade without touching Redis.
+#
+#   docker compose -f docker-compose.postgres.yml up -d
+#   docker compose -f docker-compose.postgres.yml ps
+#   docker compose -f docker-compose.postgres.yml logs -f
+#   docker compose -f docker-compose.postgres.yml down       # keep data
+#   docker compose -f docker-compose.postgres.yml down -v    # DESTROY data
+#
+# Connection: postgres://mercur:mercur@localhost:5432/mercur
+
+name: mercur-postgres
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: mercur-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mercur}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mercur}
+      POSTGRES_DB: ${POSTGRES_DB:-mercur}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mercur} -d ${POSTGRES_DB:-mercur}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+volumes:
+  pgdata:
+    name: mercur-pgdata

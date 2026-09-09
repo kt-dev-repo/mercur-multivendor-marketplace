@@ -19,7 +19,8 @@ is a *new* file sitting beside upstream ones, so `git diff upstream/main` shows
 only additions and `git merge upstream/main` can never conflict.
 
 Local additions (committed on `main`):
-- `docker-compose.local.yml` — Postgres 16 + Redis 7
+- `docker-compose.postgres.yml`, `docker-compose.redis.yml` — Postgres 16 and
+  Redis 7 as two independent services (separate compose projects)
 - `CLAUDE.local.md` — this file
 - `LOCAL-SETUP.md` — the runbook
 - `.claude/skills/medusa/`, `.claude/skills/mercur/` — local skills
@@ -45,8 +46,8 @@ do not try to merge the two.
 | `apps/storefront` | 3000 | Next.js; not in the CLI scaffold |
 | `apps/admin-test` | **7001** | docs say 7000 — that is the `preview` port |
 | `apps/vendor` | **7002** | docs say 7001 — that is the `preview` port |
-| Postgres | 5432 | container `mercur-postgres` |
-| Redis | 6379 | container `mercur-redis` |
+| Postgres | 5432 | container `mercur-postgres`, own compose file |
+| Redis | 6379 | container `mercur-redis`, own compose file |
 
 ## Commit policy conflict — ask before committing
 

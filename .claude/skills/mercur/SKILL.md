@@ -80,11 +80,17 @@ bun run build               # turbo; packages build before apps
 bun run lint                # oxlint
 ```
 
-Data stores must be up first (Postgres 13+ and Redis). In this workspace they run from the local-only compose file:
+Data stores must be up first (Postgres 13+ and Redis). They run as two
+independent services, one compose file each:
 
 ```bash
-docker compose -f docker-compose.local.yml up -d
+docker compose -f docker-compose.postgres.yml up -d
+docker compose -f docker-compose.redis.yml    up -d
 ```
+
+Either can be restarted or wiped alone. To use externally hosted instances
+instead, skip both and point `DATABASE_URL` / `REDIS_URL` in `apps/api/.env` at
+them — nothing else in the repo references the compose files.
 
 Then:
 
