@@ -190,16 +190,14 @@ curl -X POST "http://localhost:9000/store/carts/$CART/line-items" \
 1. **`bun run test:unit` cannot resolve `@swc/jest`.** The script runs
    `jest --rootDir ..`, so Jest looks for the transform at the repo root, but bun
    installs `@swc/jest` only into `integration-tests/node_modules` and
-   `apps/api/node_modules`. Fix locally in the generated `node_modules` dir:
+   `apps/api/node_modules`. **Fixed by overlay 002** — apply it instead of
+   symlinking anything:
 
    ```bash
-   mkdir -p node_modules/@swc
-   ln -s ../../integration-tests/node_modules/@swc/jest node_modules/@swc/jest
-   ln -s ../../integration-tests/node_modules/@swc/core node_modules/@swc/core
+   ./deploy/overlays/apply.sh --only 002
    ```
 
-   The proper upstream fix would be a root devDependency. Re-apply after a clean
-   `bun install`.
+   (A `node_modules/@swc` symlink also works but is wiped by a clean install.)
 
 2. **Integration tests need a `postgres` superuser.** `integration-tests/.env.test`
    hardcodes `postgres:postgres@localhost:5432`, and `@medusajs/test-utils` builds
@@ -238,7 +236,8 @@ added files and future `git merge upstream/main` cannot conflict.
 | Storefront empty | publishable key missing, or region ≠ `de` |
 | `db:migrate` connection refused | `podman compose -f docker-compose.postgres.yml ps` — service down or unhealthy |
 | `bunx: command not found` | use `bun x` |
-| `@swc/jest ... not found` | re-apply the root `node_modules/@swc` symlinks |
+| `@swc/jest ... not found` | `./deploy/overlays/apply.sh --only 002` |
+| unknown product/seller URL returns 200 | `./deploy/overlays/apply.sh --only 001` (images apply it automatically) |
 | `Field 'offer_id' is required` | use `offer_id` from `product.variants[].offer_id`, not `variant_id` |
 | Duplicate `@medusajs/*` versions | root `overrides` pin 2.20.1 — never bump per-workspace |
 | Port already in use | `lsof -ti tcp:<port>` then kill |

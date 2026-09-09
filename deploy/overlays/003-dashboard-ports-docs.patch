@@ -1,0 +1,54 @@
+diff --git a/CLAUDE.md b/CLAUDE.md
+index 7e89bda58..66dc06b9a 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -37,8 +37,8 @@ bun run test:integration:tests       # Run integration tests
+ - `packages/registry` - Private workspace for the Mercur blocks registry
+ - `packages/providers/payout-stripe-connect` - Stripe Connect payout provider
+ - `apps/api` - Starter Medusa server wired to `@mercurjs/core`
+-- `apps/admin-test` - Starter admin Vite app (port 7000)
+-- `apps/vendor` - Starter vendor Vite app (port 7001)
++- `apps/admin-test` - Starter admin Vite app (port 7001)
++- `apps/vendor` - Starter vendor Vite app (port 7002)
+ - `apps/docs` - Documentation site (Mintlify)
+ - `integration-tests` - Cross-package Jest integration suites
+ 
+@@ -52,10 +52,10 @@ bun run test:integration:tests       # Run integration tests
+ When the user asks to test a worktree (e.g. "test this worktree", "run this worktree", "spin up <worktree-name>"):
+ 
+ 1. Run `./scripts/dev-worktree.sh <worktree-name>` in the background (e.g. `./scripts/dev-worktree.sh spec013-cont`).
+-2. Once the apps are up, return these URLs to the user:
+-   - API: http://localhost:9000
+-   - Admin: http://localhost:7000
+-   - Vendor: http://localhost:7001
++2. `dev-worktree.sh` assigns a free port per worktree rather than fixed ones, so
++   read them back before reporting anything:
++   `./scripts/dev-worktree.sh <worktree-name> ports`
++3. Return the resulting URLs to the user (api/admin/vendor).
+ 
+ ## Writing Code
+ 
+diff --git a/docs/ARCHITECTURE.md b/docs/ARCHITECTURE.md
+index 544f1ed9a..7228df14b 100644
+--- a/docs/ARCHITECTURE.md
++++ b/docs/ARCHITECTURE.md
+@@ -44,7 +44,7 @@ The repository is a Turborepo monorepo managed with Bun. It contains the framewo
+ Dashboards (separate Vite apps that talk to the API above):
+ 
+ +-----------------------------------+   +---------------------------------+
+-|  Admin (apps/admin-test :7000)    |   |  Vendor (apps/vendor :7001)     |
++|  Admin (apps/admin-test :7001)    |   |  Vendor (apps/vendor :7002)     |
+ |  @mercurjs/admin pages            |   |  @mercurjs/vendor pages         |
+ |  @mercurjs/dashboard-shared       |   |  @mercurjs/dashboard-shared     |
+ |  @mercurjs/dashboard-sdk (Vite    |   |  @mercurjs/dashboard-sdk        |
+@@ -105,8 +105,8 @@ Stripe Connect implementation for the `payout` module: creates connected account
+ ## Apps (starters wired to the packages)
+ 
+ - **`apps/api`** — Medusa 2.x server. `medusa-config.ts` calls `withMercur()` to mount the core plugin and RBAC module. Exposes `/admin`, `/vendor`, and `/store` routes. Scripts: `dev`, `start`, `test:integration:http`, `test:integration:modules`, `test:unit`.
+-- **`apps/admin-test`** — Vite app on **port 7000**. Mounts `@mercurjs/admin`, runs `mercurDashboardPlugin` from `@mercurjs/dashboard-sdk`, and points at the API. Drop a `page.tsx` under `src/routes` to add an admin page.
+-- **`apps/vendor`** — Vite app on **port 7001**. Same setup as admin but mounts `@mercurjs/vendor`. Used by sellers.
++- **`apps/admin-test`** — Vite app on **port 7001** (`preview` uses 7000). Mounts `@mercurjs/admin`, runs `mercurDashboardPlugin` from `@mercurjs/dashboard-sdk`, and points at the API. Drop a `page.tsx` under `src/routes` to add an admin page.
++- **`apps/vendor`** — Vite app on **port 7002** (`preview` uses 7001). Same setup as admin but mounts `@mercurjs/vendor`. Used by sellers.
+ - **`apps/docs`** — Mintlify documentation site.
+ 
+ ## Templates (consumed by the CLI)

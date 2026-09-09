@@ -24,6 +24,8 @@ Local additions (committed on `main`):
   **Podman**
 - `CLAUDE.local.md` — this file
 - `LOCAL-SETUP.md` — the runbook
+- `deploy/overlays/` — patches for upstream files, applied on a copy, never committed
+- `deploy/dokploy/` — production images and the Dokploy compose stack
 - `.claude/skills/medusa/`, `.claude/skills/mercur/` — local skills
   (`.gitignore` ignores `.claude`, so these are force-added — the same way
   upstream tracks its own skills)
@@ -49,6 +51,19 @@ do not try to merge the two.
 | `apps/vendor` | **7002** | docs say 7001 — that is the `preview` port |
 | Postgres | 5432 | container `mercur-postgres`, own compose file |
 | Redis | 6379 | container `mercur-redis`, own compose file |
+
+## Overlays — how upstream bugs get fixed here
+
+Upstream files are never edited in a commit. Fixes live as patches in
+`deploy/overlays/` and are applied **on a copy**: inside each image at build
+time, or temporarily in a checkout with `./deploy/overlays/apply.sh`
+(`--check` / `--revert` / `--only <prefix>`).
+
+Currently: storefront soft-404s, the `test:unit` @swc/jest resolution failure,
+and the wrong dashboard ports in the upstream docs.
+
+While overlays are applied, `git status` shows modified upstream files. That is
+expected. **Never commit an overlaid file** — run `apply.sh --revert` first.
 
 ## Container engine
 

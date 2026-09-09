@@ -48,6 +48,25 @@ quirks; they are how the apps are built.
 
 ---
 
+## 0b. Overlays are applied during the image build
+
+`main` never modifies an upstream file. Fixes to upstream code live as patches in
+`deploy/overlays/` and each image runs `deploy/overlays/apply.sh` while building,
+so deployments get them without the repository carrying them.
+
+You will see this in the build log:
+
+```
+  applied     001-storefront-not-found-status.patch
+  applied     002-jest-swc-transform-resolution.patch
+  skipped     003-dashboard-ports-docs.patch  (targets not in this tree)
+```
+
+`skipped` is normal — images do not copy `docs/` or `CLAUDE.md`. A **`CONFLICT`
+line fails the build on purpose**: it means upstream changed underneath a patch,
+and the patch must be regenerated rather than forced. See
+`deploy/overlays/README.md`.
+
 ## 1. Requirements
 
 - A Dokploy server with Traefik running (the default).
@@ -243,6 +262,8 @@ written:
 | Storefront container against the API container | `/de` 200, **4 product cards rendered**, no error overlay |
 | Build args baked in | page title reflected `NEXT_PUBLIC_SITE_NAME` |
 | `Dockerfile.dashboard` builds (`APP=vendor`) | yes |
+| Overlays applied in every image build | 001 + 002 applied, 003 correctly skipped |
+| 404s in the **production** storefront image | unknown product / seller / collection → **404**; `/de`, existing product, existing seller → **200** |
 | Dashboard SPA fallback on a deep route | 200, not 404 |
 | `VITE_MERCUR_BACKEND_URL` baked into the bundle | found in `assets/*.js` |
 
@@ -275,7 +296,12 @@ written:
    `seed.js`, so the packaged script path fails. `entrypoint-api.sh` prefers `.js`
    and falls back to `.ts`.
 
-6. **Storefront soft-404s.** Unknown product, seller and collection handles return
-   HTTP 200 instead of 404 (`ProductDetailsPage.tsx` does `if (!prod) return null`).
-   Only categories call `notFound()`. Cosmetic for users, bad for SEO — search
-   engines will index empty pages.
+6. **Storefront soft-404s** — unknown product, seller and collection handles
+   returned HTTP 200 instead of 404. **Fixed by overlay `001`**, applied in the
+   image build, so deployments serve correct status codes.
+
+7. **`bun run test:unit` cannot resolve `@swc/jest`** — **fixed by overlay `002`**.
+
+8. **Wrong dashboard ports in the upstream docs** (admin 7000 / vendor 7001 are
+   the `preview` ports; `dev` binds 7001 / 7002) — **fixed by overlay `003`**,
+   which applies in a checkout but is skipped in images.

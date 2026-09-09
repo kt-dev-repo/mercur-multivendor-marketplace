@@ -1,0 +1,20 @@
+diff --git a/integration-tests/jest.config.js b/integration-tests/jest.config.js
+index 952ff7db5..ccc977405 100644
+--- a/integration-tests/jest.config.js
++++ b/integration-tests/jest.config.js
+@@ -9,9 +9,13 @@ module.exports = {
+     // module hooks, so without this the patches are inert under test and the
+     // suite silently exercises unpatched code.
+     "node_modules[\\\\/].*core-flows[\\\\/]dist[\\\\/]cart[\\\\/].*\\.js$":
+-      "@mercurjs/core/patches/jest-transformer",
++      require.resolve("@mercurjs/core/patches/jest-transformer"),
++    // Resolved from this file, not from rootDir. The unit run sets rootDir to
++    // the repo root, where the workspace installer does not place @swc/jest —
++    // Jest would then fail with "Module @swc/jest in the transform option was
++    // not found" before running a single test.
+     "^.+\\.[jt]s$": [
+-      "@swc/jest",
++      require.resolve("@swc/jest"),
+       {
+         jsc: {
+           parser: { syntax: "typescript", decorators: true },
