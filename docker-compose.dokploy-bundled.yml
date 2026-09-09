@@ -1,47 +1,61 @@
-# Mercur marketplace — Dokploy Compose stack.
+# Mercur marketplace — ALL-IN-ONE Dokploy stack (Postgres and Redis included).
 #
-# Postgres and Redis are NOT part of this stack. They run as their own Dokploy
-# services (Dokploy → Create Service → Database), and this stack reaches them
-# over the shared Dokploy network.
+# Use this only if you want the databases inside the same stack. If you run
+# Postgres and Redis as SEPARATE Dokploy services — the recommended setup, and
+# what deploy/dokploy/README.md documents — use docker-compose.dokploy.yml
+# instead.
 #
-# Setup:
-#   1. Create the Postgres and Redis services in Dokploy first.
-#   2. Copy each one's INTERNAL connection details from its Dokploy page.
-#   3. Create a Compose service pointing at this file.
-#   4. Paste deploy/dokploy/.env.example into Environment and fill it in —
-#      DATABASE_URL and REDIS_URL are full URLs using those internal hostnames.
-#   5. Attach a domain to api, storefront, vendor and admin.
+# In Dokploy: create a "Compose" service, point it at this repo, set the compose
+# path to docker-compose.dokploy-bundled.yml, paste deploy/dokploy/.env.example
+# into the Environment tab and fill it in, then Deploy.
 #
-# Read deploy/dokploy/README.md before the first deploy. Two things bite people:
-# the shared network below must exist, and the storefront/dashboards bake their
-# public URLs in at BUILD time, so the order of operations matters.
+# Do NOT publish host ports here. Dokploy routes traffic through its own Traefik
+# using the domains you attach to each service in the UI.
 #
-# No host ports are published — Dokploy's Traefik routes to the containers by
-# the domains you attach in the UI.
-
-networks:
-  # Dokploy's shared network. Every service it manages joins this, and it is the
-  # ONLY way this stack can resolve the Postgres and Redis services by hostname:
-  # compose `depends_on` and service-name DNS do not cross project boundaries.
-  # Confirm the name on your server with `docker network ls`; override with
-  # DOKPLOY_NETWORK if yours differs.
-  dokploy:
-    external: true
-    name: ${DOKPLOY_NETWORK:-dokploy-network}
+# Read deploy/dokploy/README.md before the first deploy — the storefront and
+# dashboards bake their public URLs in at BUILD time, so the order of operations
+# matters.
 
 services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
   api:
     build:
       context: .
       dockerfile: deploy/dokploy/Dockerfile.api
     restart: unless-stopped
-    networks: [dokploy]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
     environment:
-      # Full URLs pointing at the separate Dokploy services. The host is each
-      # service's INTERNAL hostname from its Dokploy page — never localhost,
-      # which inside this container means the API container itself.
-      DATABASE_URL: ${DATABASE_URL}
-      REDIS_URL: ${REDIS_URL}
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET}
       COOKIE_SECRET: ${COOKIE_SECRET}
       STORE_CORS: ${STORE_CORS}
@@ -72,17 +86,9 @@ services:
       ADMIN_EMAIL: ${ADMIN_EMAIL}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       RUN_SEED: ${RUN_SEED:-false}
-      # How long the entrypoint waits for Postgres and Redis before giving up.
-      # There is no depends_on across Dokploy services, so this is the ordering
-      # guarantee.
-      WAIT_TIMEOUT: ${WAIT_TIMEOUT:-120}
-      # Medusa aborts migrations if a probe query does not return within this
-      # many ms (default 10000). It can fire even when the database is
-      # reachable; see the note in deploy/dokploy/README.md.
-      MEDUSA_DB_MIGRATION_CONNECTION_TIMEOUT: ${MEDUSA_DB_MIGRATION_CONNECTION_TIMEOUT:-30000}
     volumes:
-      # Only used by the LOCAL file provider. Once S3_BUCKET is set this is dead
-      # weight and can be removed. Without it, local uploads vanish on redeploy.
+      # Uploads written by the local file provider. Without this they vanish on
+      # every redeploy. Swap the provider for S3 in production if you can.
       - uploads:/app/static
     expose:
       - "9000"
@@ -92,8 +98,6 @@ services:
       context: .
       dockerfile: deploy/dokploy/Dockerfile.storefront
       args:
-        # BUILD-TIME. Baked into the client bundle; changing any of these needs a
-        # rebuild, not a restart.
         MEDUSA_BACKEND_URL: ${API_PUBLIC_URL}
         NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY: ${NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY}
         NEXT_PUBLIC_BASE_URL: ${STOREFRONT_PUBLIC_URL}
@@ -104,10 +108,9 @@ services:
         NEXT_PUBLIC_VENDOR_URL: ${VENDOR_PUBLIC_URL}
         REVALIDATE_SECRET: ${REVALIDATE_SECRET}
     restart: unless-stopped
-    networks: [dokploy]
+    depends_on:
+      api: { condition: service_started }
     environment:
-      # Server-side only, so this one CAN change at runtime. It is the public
-      # API origin because the browser follows the same URLs.
       MEDUSA_BACKEND_URL: ${API_PUBLIC_URL}
       REVALIDATE_SECRET: ${REVALIDATE_SECRET}
     expose:
@@ -121,7 +124,6 @@ services:
         APP: vendor
         VITE_MERCUR_BACKEND_URL: ${API_PUBLIC_URL}
     restart: unless-stopped
-    networks: [dokploy]
     expose:
       - "80"
 
@@ -133,9 +135,10 @@ services:
         APP: admin-test
         VITE_MERCUR_BACKEND_URL: ${API_PUBLIC_URL}
     restart: unless-stopped
-    networks: [dokploy]
     expose:
       - "80"
 
 volumes:
+  pgdata:
+  redisdata:
   uploads:

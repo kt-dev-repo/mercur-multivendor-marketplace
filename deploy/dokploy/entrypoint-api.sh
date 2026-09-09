@@ -9,6 +9,49 @@ set -e
 
 MEDUSA=/app/node_modules/.bin/medusa
 
+# Wait for Postgres and Redis before touching them.
+#
+# When they run as SEPARATE Dokploy services, compose `depends_on` cannot span
+# projects, so there is no ordering guarantee at all — the API may start while
+# the database is still booting, or seconds before the shared network is ready.
+# Without this the container dies on a raw connection error and crash-loops with
+# a message that looks like a credentials problem rather than a timing one.
+wait_for() {
+  name=$1 url=$2 timeout=${WAIT_TIMEOUT:-120}
+  node -e '
+    const { hostname, port, protocol } = new URL(process.argv[1])
+    const net = require("net")
+    const deadline = Date.now() + Number(process.argv[2]) * 1000
+    const fallback = protocol.startsWith("redis") ? 6379 : 5432
+    const target = Number(port || fallback)
+    ;(function attempt () {
+      const socket = net.connect({ host: hostname, port: target })
+      socket.setTimeout(3000)
+      socket.on("connect", () => { socket.destroy(); process.exit(0) })
+      const retry = () => {
+        socket.destroy()
+        if (Date.now() > deadline) {
+          console.error(`  unreachable after ${process.argv[2]}s: ${hostname}:${target}`)
+          process.exit(1)
+        }
+        setTimeout(attempt, 2000)
+      }
+      socket.on("error", retry)
+      socket.on("timeout", retry)
+    })()
+  ' "$url" "$timeout" || {
+    echo "ERROR: cannot reach $name. With separate Dokploy services, check that" >&2
+    echo "  the API and $name share a network and that the host in the URL is the" >&2
+    echo "  service's INTERNAL hostname, not localhost." >&2
+    exit 1
+  }
+  echo "  $name reachable"
+}
+
+echo "→ Waiting for dependencies"
+wait_for postgres "$DATABASE_URL"
+wait_for redis    "$REDIS_URL"
+
 echo "→ Running migrations"
 node "$MEDUSA" db:migrate
 

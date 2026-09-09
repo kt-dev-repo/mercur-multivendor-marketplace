@@ -86,12 +86,86 @@ and the patch must be regenerated rather than forced. See
   it; the host still has to have that memory to give.
 - Roughly **8 GB free disk** for the image layers and the bun install cache.
 
+## 1b. Architecture: what talks to what
+
+Postgres and Redis are **separate Dokploy services**. This stack contains only
+the four application services and reaches the databases over Dokploy's shared
+Docker network.
+
+```
+                    Traefik (Dokploy, TLS + routing)
+   shop.example.com   admin.example.com  vendor.example.com  api.example.com
+          |                  |                  |                  |
+     storefront:3000     admin:80          vendor:80           api:9000
+          |                  |                  |                  |
+          +------------------+------------------+------------------+
+                    all browser traffic goes to API_PUBLIC_URL
+                                       |
+                                    api:9000
+                                       |
+                     dokploy-network (internal, no TLS)
+                          |                       |
+                 postgres:5432              redis:6379
+              (separate Dokploy service)  (separate Dokploy service)
+```
+
+**Two different kinds of connection, and mixing them up is the usual failure:**
+
+| Hop | Address to use | Why |
+|---|---|---|
+| Browser → storefront / dashboards / API | **public** `https://…` domains | real client traffic, must be TLS |
+| Storefront (server-side) → API | **public** `API_PUBLIC_URL` | it renders URLs the browser will reuse |
+| Dashboards → API | **public** `API_PUBLIC_URL` | the bundle runs in the browser |
+| **API → Postgres / Redis** | **internal hostname**, e.g. `postgres:5432` | stays inside the server, never hits Traefik |
+
+`localhost` in `DATABASE_URL` or `REDIS_URL` refers to the **API container
+itself** and is the single most common cause of a failed deploy.
+
+### Build-time vs runtime
+
+| Variable | When it takes effect |
+|---|---|
+| `NEXT_PUBLIC_*`, `VITE_MERCUR_BACKEND_URL`, `API_PUBLIC_URL` (as a build arg) | **build** — changing it needs a Redeploy/rebuild |
+| `DATABASE_URL`, `REDIS_URL`, `*_CORS`, `S3_*`, `JWT_SECRET`, `MEDUSA_BACKEND_URL` | **runtime** — a restart is enough |
+
+## 1c. Create Postgres and Redis first
+
+1. Dokploy → **Create Service → Database → PostgreSQL** (16+). Note the
+   generated user, password, database name and **internal hostname**.
+2. Dokploy → **Create Service → Database → Redis**.
+3. Confirm the shared network name on the server:
+
+   ```bash
+   docker network ls | grep dokploy
+   ```
+
+   It is normally `dokploy-network`. If yours differs, set `DOKPLOY_NETWORK`.
+
+4. Build the URLs for the Environment tab:
+
+   ```env
+   DATABASE_URL=postgres://<user>:<password>@<postgres-internal-host>:5432/<db>
+   REDIS_URL=redis://<redis-internal-host>:6379
+   # with a Redis password:
+   # REDIS_URL=redis://:<password>@<redis-internal-host>:6379
+   ```
+
+There is **no `depends_on`** across Dokploy services, so nothing guarantees the
+databases are up before the API starts. The API entrypoint therefore waits for
+both (TCP) before running migrations, up to `WAIT_TIMEOUT` seconds (default 120)
+and logs which one it could not reach.
+
+> Prefer the databases bundled into this stack instead? Use
+> `docker-compose.dokploy-bundled.yml`, which includes them and needs no shared
+> network — simpler, but the data lives and dies with the app stack.
+
 ## 2. Create the Compose service
 
 1. Dokploy → **Create Service** → **Compose**.
 2. Provider: **GitHub** (or Git), repository
    `kt-dev-repo/mercur-multivendor-marketplace`, branch `main`.
 3. **Compose Path**: `docker-compose.dokploy.yml`
+   (or `docker-compose.dokploy-bundled.yml` to run the databases inside the stack)
 4. Leave the build context alone — the Dockerfiles expect the **repo root**.
 
 ## 3. Environment
@@ -157,8 +231,9 @@ no publishable key yet.
 
 ## 6. Wire the publishable key (required, once)
 
-The seed creates a `Default Publishable API Key`. Read it from the database —
-in Dokploy open a **Terminal** on the `postgres` container:
+The seed creates a `Default Publishable API Key`. Read it from the database — in
+Dokploy open a **Terminal** on your **Postgres service** (it is a separate
+service, not part of this stack):
 
 ```bash
 psql -U mercur -d mercur -tAc \
@@ -243,7 +318,10 @@ drops in-flight workflow state. Appendonly persistence is on.
 | CORS errors in browser console | The exact origin is missing from `STORE_CORS` / `ADMIN_CORS` / `VENDOR_CORS` / `AUTH_CORS`. Include the scheme, no trailing slash. |
 | Dashboard loads but every API call fails | `VITE_MERCUR_BACKEND_URL` was empty at build time. Set `API_PUBLIC_URL` and rebuild. |
 | Dashboard 404s on refresh of a sub-route | SPA fallback missing — `nginx-spa.conf` must be present in the image. |
-| `db:migrate` cannot connect | `postgres` unhealthy. Check its logs and that `POSTGRES_*` match `DATABASE_URL`. |
+| API logs `cannot reach postgres` / `cannot reach redis` | The stack and the database service are not on the same network, or the URL uses `localhost`. Check `DOKPLOY_NETWORK` matches `docker network ls`, and that the host is the service's internal hostname. |
+| `getaddrinfo ENOTFOUND <host>` | Wrong internal hostname, or the database service is in a different Dokploy project. |
+| API restarts in a loop right after deploy | Databases still starting. Raise `WAIT_TIMEOUT`. |
+| Migrations hang, then `Could not connect to the database while running migrations` | Medusa's pre-migration probe timed out. Raise `MEDUSA_DB_MIGRATION_CONNECTION_TIMEOUT` (ms, default 10000). See the note below — it can fire even when the database is reachable. |
 | Build OOM-killed | Under 4 GB RAM. Increase the build host, or build images in CI and deploy by tag. |
 | Uploaded images 404 (local provider) | `FILE_BACKEND_URL` must be `${API_PUBLIC_URL}/static`. |
 | S3 uploads fail with `AccessDenied` on the ACL | set `S3_ACL=false` (BucketOwnerEnforced / R2). |
@@ -280,6 +358,33 @@ written:
 | 404s in the **production** storefront image | unknown product / seller / collection → **404**; `/de`, existing product, existing seller → **200** |
 | Dashboard SPA fallback on a deep route | 200, not 404 |
 | `VITE_MERCUR_BACKEND_URL` baked into the bundle | found in `assets/*.js` |
+
+## A note on the migration connection probe
+
+Before migrating, Medusa races a `SELECT 1` against a timer
+(`MEDUSA_DB_MIGRATION_CONNECTION_TIMEOUT`, default 10000 ms) and aborts with
+"Could not connect to the database while running migrations … usually indicates
+an incorrect database URL or an SSL configuration issue."
+
+That message is a guess, not a diagnosis. While validating the split-services
+topology locally (podman on macOS, containers on a user-defined bridge) it fired
+**even though the database was fully reachable** — the same image had already
+connected and created the `mikro_orm_migrations` table moments earlier, and
+direct `pg` (8 ms), `knex` (11 ms), 80 concurrent connections (55 ms), 1 MB
+result sets and Redis round-trips all succeeded on that same network. The
+identical image and configuration migrated a fresh database successfully on host
+networking in 20 s.
+
+So if you hit it, **check reachability before believing the message**:
+
+```bash
+# from a shell in the API container
+node -e "new (require('/app/node_modules/pg').Client)({connectionString:process.env.DATABASE_URL}).connect().then(()=>console.log('db ok'))"
+```
+
+If that succeeds, the probe is the problem, not your URL — raise
+`MEDUSA_DB_MIGRATION_CONNECTION_TIMEOUT`. This was not reproduced on Docker under
+Linux, which is what Dokploy runs.
 
 ## Known upstream issues affecting deploys
 
