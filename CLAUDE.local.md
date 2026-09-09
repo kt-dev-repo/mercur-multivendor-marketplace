@@ -20,7 +20,8 @@ only additions and `git merge upstream/main` can never conflict.
 
 Local additions (committed on `main`):
 - `docker-compose.postgres.yml`, `docker-compose.redis.yml` — Postgres 16 and
-  Redis 7 as two independent services (separate compose projects)
+  Redis 7 as two independent services (separate compose projects), run under
+  **Podman**
 - `CLAUDE.local.md` — this file
 - `LOCAL-SETUP.md` — the runbook
 - `.claude/skills/medusa/`, `.claude/skills/mercur/` — local skills
@@ -48,6 +49,22 @@ do not try to merge the two.
 | `apps/vendor` | **7002** | docs say 7001 — that is the `preview` port |
 | Postgres | 5432 | container `mercur-postgres`, own compose file |
 | Redis | 6379 | container `mercur-redis`, own compose file |
+
+## Container engine
+
+Podman Desktop owns `/var/run/docker.sock` here, so the `default` docker context
+resolves to Podman 6.1.0 (`linux/arm64/fedora-44`). `docker compose` and
+`podman compose` are equivalent on this machine; prefer `podman`.
+
+## Toolchain gotchas
+
+- No `bunx` — use `bun x`.
+- `bun run test:unit` needs `node_modules/@swc/{jest,core}` symlinked from
+  `integration-tests/node_modules` (bun does not hoist them; `--rootDir ..`
+  makes Jest look at the root). Re-apply after a clean install.
+- Integration tests need a `postgres` superuser role in Postgres, because
+  `integration-tests/.env.test` hardcodes `postgres:postgres`.
+- Store cart line items take `offer_id`, never `variant_id`.
 
 ## Commit policy conflict — ask before committing
 

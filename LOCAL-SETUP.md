@@ -35,14 +35,22 @@ git remote set-url --push upstream DISABLED
 Postgres and Redis run as **two independent services**, one compose file each, so
 either can be stopped, upgraded, or wiped without touching the other.
 
+**Engine: Podman.** Podman Desktop owns `/var/run/docker.sock` on this machine —
+the `default` docker context reports server `6.1.0 / linux-arm64 / fedora-44`, so
+`docker compose` and `podman compose` both hit the same Podman engine. Either
+command works; `podman` is the canonical one here.
+
 ```bash
-docker compose -f docker-compose.postgres.yml up -d
-docker compose -f docker-compose.redis.yml    up -d
+podman compose -f docker-compose.postgres.yml up -d
+podman compose -f docker-compose.redis.yml    up -d
 ```
 
-Verified on 2026-09-09: `mercur-postgres` healthy (PostgreSQL 16.15),
-`mercur-redis` healthy (`PONG`). They register as two separate compose projects
-(`docker compose ls`).
+`podman compose` delegates to the external `docker-compose` provider (that notice
+is expected). Published ports are forwarded by `gvproxy`.
+
+Verified on 2026-09-09 under Podman 6.1.0: `mercur-postgres` healthy
+(PostgreSQL 16.15), `mercur-redis` healthy (`PONG`). They register as two
+separate compose projects (`podman compose ls`).
 
 | Service | Container | URL | Volume |
 |---|---|---|---|
@@ -52,10 +60,10 @@ Verified on 2026-09-09: `mercur-postgres` healthy (PostgreSQL 16.15),
 Per-service control:
 
 ```bash
-docker compose -f docker-compose.redis.yml restart      # Redis only
-docker compose -f docker-compose.postgres.yml logs -f   # Postgres only
-docker compose -f docker-compose.postgres.yml down      # stop, keep data
-docker compose -f docker-compose.postgres.yml down -v   # DESTROY data
+podman compose -f docker-compose.redis.yml restart      # Redis only
+podman compose -f docker-compose.postgres.yml logs -f   # Postgres only
+podman compose -f docker-compose.postgres.yml down      # stop, keep data
+podman compose -f docker-compose.postgres.yml down -v   # DESTROY data
 ```
 
 Credentials and ports are overridable without editing the files —
@@ -72,12 +80,10 @@ running Postgres/Redis, skip this step and point `DATABASE_URL` and `REDIS_URL`
 in `apps/api/.env` at them. For a managed Postgres that enforces TLS, append
 `?ssl_mode=require`.
 
-## 3. Environment files **[pending]**
+## 3. Environment files **[done]**
 
-Both paths are already gitignored upstream — safe to create.
-
-`apps/api/.env` (based on `templates/basic/packages/api/.env.template`, with CORS
-widened to the ports actually used):
+Both are gitignored upstream. `apps/api/.env` as listed below; the CORS lists are
+widened because the upstream template targets ports the apps do not actually use.
 
 ```env
 DATABASE_URL=postgres://mercur:mercur@localhost:5432/mercur
@@ -94,51 +100,125 @@ STOREFRONT_REVALIDATE_SECRET=supersecret
 FILE_BACKEND_URL=http://localhost:9000/static
 ```
 
-> Why the template values were widened: it ships `STORE_CORS=...:8000` (storefront
-> is on 3000) and `VENDOR_CORS=...:7001` (vendor actually binds 7002).
+`apps/storefront/.env.local` = copy of `.env.template`, with the publishable key
+from step 5 and `NEXT_PUBLIC_DEFAULT_REGION=de`.
 
-`apps/storefront/.env.local` — copy `apps/storefront/.env.template`, keep
-`NEXT_PUBLIC_DEFAULT_REGION=de` (matches the seed), fill the publishable key from step 5.
-
-## 4. Install & build **[pending]**
+## 4. Install & build **[done]**
 
 ```bash
-bun install
-bun run build
+bun install     # 4316 packages, ~97s; bun.lock unchanged
+bun run build   # turbo: 12/12 tasks OK, ~42s
+bun run lint    # oxlint, clean
 ```
 
-## 5. Database bring-up **[pending]**
+Turbo warns `no output files found for task @mercurjs/storefront#build` — an
+upstream `turbo.json` `outputs` gap (it does not list `.next`). Harmless; the
+Next build does produce output.
+
+## 5. Database bring-up **[done]**
+
+There is **no `bunx`** in this toolchain — use `bun x`.
 
 ```bash
 cd apps/api
-bunx medusa db:migrate
-bun run seed                      # sales channel, regions gb/de/dk/se/fr/es/it, tax, shipping
-bunx medusa user -e admin@mercur.local -p <password>
+bun x medusa db:migrate                                    # 204 tables
+bun run seed
+bun x medusa user -e admin@mercur.local -p supersecret
 ```
 
-Then create a **publishable API key** linked to the default sales channel via the
-Admin API (the seed does not create one) and put it in
-`apps/storefront/.env.local` as `NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY`.
+Seed result: 1 region (Europe: gb/de/dk/se/fr/es/it), 5 sellers (all `open`),
+50 products, **1144 offers**, plus a `Default Publishable API Key`.
 
-## 6. Run **[pending]**
+The seed **does** create the publishable key — read it and wire it in:
 
-| App | Command (from repo root) | URL |
-|---|---|---|
-| API | `cd apps/api && bun run dev` | http://localhost:9000 |
-| Storefront | `cd apps/storefront && bun run dev` | http://localhost:3000 |
-| Admin | `cd apps/admin-test && bun run dev` | http://localhost:7001 |
-| Vendor | `cd apps/vendor && bun run dev` | http://localhost:7002 |
+```bash
+podman exec mercur-postgres psql -U mercur -d mercur -tAc \
+  "select token from api_key where type='publishable' and revoked_at is null;"
+```
+
+## 6. Run **[done]**
+
+| App | Command | URL | Verified |
+|---|---|---|---|
+| API | `cd apps/api && bun run dev` | http://localhost:9000 | `/health` 200, ready in 4.0s |
+| Storefront | `cd apps/storefront && bun run dev` | http://localhost:3000 | `/` → 307 → `/de`, 200, renders seeded products |
+| Admin | `cd apps/admin-test && bun run dev` | http://localhost:7001 | 200 |
+| Vendor | `cd apps/vendor && bun run dev` | http://localhost:7002 | 200 |
 
 Do **not** use `scripts/dev.sh` — it hardcodes another machine's path and omits
 the storefront.
 
-## 7. Smoke test **[pending]**
+## 7. Verification results **[done — all green]**
 
-1. `GET http://localhost:9000/health` → 200
-2. Storefront lists seeded products, region `de`
-3. Add to cart succeeds
-4. Admin login at :7001
-5. Vendor login at :7002
+API, 2026-09-09:
+
+| Check | Result |
+|---|---|
+| `GET /health` | 200 |
+| `GET /store/products` (publishable key) | 200, count **50** |
+| `GET /store/regions` | Europe → dk, fr, de, it, es, se, gb |
+| `POST /auth/user/emailpass` | JWT issued |
+| `GET /admin/sellers` | 5 sellers, all `open` |
+| `GET /admin/commission-rates` / `/admin/orders` | 200 / 200 |
+| `GET /vendor/products` unauthenticated | **401** (scoping enforced) |
+| Cart: create → add offer ×2 | total **88 eur** |
+| Storefront `/de` | 200, 419 KB, renders "Apex Pool Slides", no error overlay |
+
+Suites:
+
+| Suite | Result |
+|---|---|
+| `bun run lint` | clean |
+| `bun run test:unit` | **13 passed / 13**, 3 suites |
+| `integration-tests/http/collections/vendor` | **9 passed / 9** |
+| `integration-tests/http/seller` (admin+vendor+store) | **180 passed / 180**, 85s |
+
+### Cart line items take `offer_id`, not `variant_id`
+
+The single most surprising API difference from stock Medusa:
+
+```bash
+# fails: "Field 'offer_id' is required; Unrecognized fields: 'variant_id'"
+# correct — offer id comes from product.variants[].offer_id
+curl -X POST "http://localhost:9000/store/carts/$CART/line-items" \
+  -H "x-publishable-api-key: $PK" -H 'Content-Type: application/json' \
+  -d '{"offer_id":"offer_...","quantity":2}'
+```
+
+### Two upstream issues worked around without editing tracked files
+
+1. **`bun run test:unit` cannot resolve `@swc/jest`.** The script runs
+   `jest --rootDir ..`, so Jest looks for the transform at the repo root, but bun
+   installs `@swc/jest` only into `integration-tests/node_modules` and
+   `apps/api/node_modules`. Fix locally in the generated `node_modules` dir:
+
+   ```bash
+   mkdir -p node_modules/@swc
+   ln -s ../../integration-tests/node_modules/@swc/jest node_modules/@swc/jest
+   ln -s ../../integration-tests/node_modules/@swc/core node_modules/@swc/core
+   ```
+
+   The proper upstream fix would be a root devDependency. Re-apply after a clean
+   `bun install`.
+
+2. **Integration tests need a `postgres` superuser.** `integration-tests/.env.test`
+   hardcodes `postgres:postgres@localhost:5432`, and `@medusajs/test-utils` builds
+   its connection from `DB_*`, not `DATABASE_URL`. The runner creates and drops
+   databases, so add the role to the server instead of editing that tracked file:
+
+   ```bash
+   podman exec mercur-postgres psql -U mercur -d mercur \
+     -c "CREATE ROLE postgres LOGIN SUPERUSER CREATEDB PASSWORD 'postgres';"
+   ```
+
+Always pass a pattern to the HTTP suite — never run it bare:
+
+```bash
+bun run test:integration:http -- integration-tests/http/seller
+```
+
+Jest prints `haste module naming collision` warnings for `templates/` and
+`apps/storefront/.next/standalone`. Cosmetic; tests still pass.
 
 ## 8. Publish **[done]**
 
@@ -156,6 +236,9 @@ added files and future `git merge upstream/main` cannot conflict.
 |---|---|
 | CORS error in a dashboard/storefront | port missing from the matching `*_CORS` in `apps/api/.env` |
 | Storefront empty | publishable key missing, or region ≠ `de` |
-| `db:migrate` connection refused | `docker compose -f docker-compose.postgres.yml ps` — service down or unhealthy |
+| `db:migrate` connection refused | `podman compose -f docker-compose.postgres.yml ps` — service down or unhealthy |
+| `bunx: command not found` | use `bun x` |
+| `@swc/jest ... not found` | re-apply the root `node_modules/@swc` symlinks |
+| `Field 'offer_id' is required` | use `offer_id` from `product.variants[].offer_id`, not `variant_id` |
 | Duplicate `@medusajs/*` versions | root `overrides` pin 2.20.1 — never bump per-workspace |
 | Port already in use | `lsof -ti tcp:<port>` then kill |

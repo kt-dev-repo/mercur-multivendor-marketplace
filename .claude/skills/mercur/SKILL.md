@@ -94,8 +94,10 @@ them — nothing else in the repo references the compose files.
 
 Then:
 
+There is no `bunx` in this toolchain — use `bun x`.
+
 ```bash
-cd apps/api && bunx medusa db:migrate && bun run seed && bun run dev   # :9000
+cd apps/api && bun x medusa db:migrate && bun run seed && bun run dev   # :9000
 cd apps/storefront && bun run dev                                       # :3000
 cd apps/admin-test && bun run dev                                       # :7001  (see gotcha)
 cd apps/vendor     && bun run dev                                       # :7002  (see gotcha)
@@ -106,11 +108,17 @@ cd apps/vendor     && bun run dev                                       # :7002 
 1. **The documented dashboard ports are wrong.** `CLAUDE.md` and `docs/ARCHITECTURE.md` say admin `:7000` and vendor `:7001`. The actual `dev` scripts bind **admin `:7001`** and **vendor `:7002`** (`:7000` and `:7001` are the *preview* ports). Trust `package.json`. Any `*_CORS` env value must cover the ports you actually run.
 2. **`scripts/dev.sh` is not portable.** It hardcodes `REPO_ROOT="/Users/viktorholik/Desktop/mercur"` and does not start the storefront. Start apps directly instead of using it.
 3. **The storefront is not in the scaffold.** `bun create mercur-app` produces `templates/basic`, which has API + admin + vendor but **no storefront**. `apps/storefront` exists only in this monorepo.
-4. **The seed does not create a publishable API key.** `apps/api/src/scripts/seed.ts` seeds sales channel, regions (`gb de dk se fr es it`), tax regions and shipping — but the storefront's `NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY` must be created separately via the Admin API or dashboard.
-5. **Storefront default region is `de`.** `.env.template` sets `NEXT_PUBLIC_DEFAULT_REGION=de`, which matches the seed. Changing one without the other yields an empty storefront.
-6. **`STORE_CORS` in `templates/basic/packages/api/.env.template` lists `:8000`, not `:3000`.** The storefront runs on `:3000`, so the template value alone blocks it.
-7. **Two zod majors coexist.** Root pins `zod@3.25.76` (backend/validators); several dashboard packages declare `zod@4.4.3`. Match the workspace you are editing.
-8. **Medusa is pinned to 2.20.1 by root `overrides`.** Do not bump it in a single workspace.
+4. **Store line items take `offer_id`, never `variant_id`.** `POST /store/carts/:id/line-items` with `variant_id` fails: `Field 'offer_id' is required; Unrecognized fields: 'variant_id'`. The offer is the sellable unit — get it from `product.variants[].offer_id` on the store product response. This is the single biggest difference from stock Medusa.
+
+5. **`bun run seed` does create a publishable API key.** It seeds the sales channel, a `Default Publishable API Key`, categories, global product attributes, 5 sellers, 50 products, and ~1144 offers. Read the token from `api_key` where `type='publishable'` and put it in `apps/storefront/.env.local`.
+
+6. **`bun run test:unit` fails out of the box under bun.** The script runs `jest --rootDir ..`, so Jest resolves `@swc/jest` from the repo root, but bun installs it only into `integration-tests/node_modules` and `apps/api/node_modules` — nothing hoists it. Symlink it into root `node_modules/@swc/` (a generated dir, no tracked file changes) and the suite runs.
+
+7. **Integration tests need a `postgres` superuser.** `integration-tests/.env.test` hardcodes `postgres:postgres@localhost:5432` and `@medusajs/test-utils` builds its connection from the `DB_*` vars, not `DATABASE_URL`. The runner creates and drops databases, so that role needs `SUPERUSER CREATEDB`. Add the role to your server rather than editing the tracked `.env.test`.
+8. **Storefront default region is `de`.** `.env.template` sets `NEXT_PUBLIC_DEFAULT_REGION=de`, which matches the seed. Changing one without the other yields an empty storefront.
+9. **`STORE_CORS` in `templates/basic/packages/api/.env.template` lists `:8000`, not `:3000`.** The storefront runs on `:3000`, so the template value alone blocks it.
+10. **Two zod majors coexist.** Root pins `zod@3.25.76` (backend/validators); several dashboard packages declare `zod@4.4.3`. Match the workspace you are editing.
+11. **Medusa is pinned to 2.20.1 by root `overrides`.** Do not bump it in a single workspace.
 
 ## Repo Working Rules (from CLAUDE.md — these are enforced)
 
