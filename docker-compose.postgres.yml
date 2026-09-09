@@ -24,6 +24,10 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+      # Runs once, when the data directory is first initialised. Creates the
+      # postgres superuser the integration test harness hardcodes. See the SQL
+      # for why the credentials cannot simply be configured.
+      - ./deploy/local/initdb:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mercur} -d ${POSTGRES_DB:-mercur}"]
       interval: 5s

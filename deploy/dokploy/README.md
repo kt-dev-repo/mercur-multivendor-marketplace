@@ -262,6 +262,8 @@ written:
 | Storefront container against the API container | `/de` 200, **4 product cards rendered**, no error overlay |
 | Build args baked in | page title reflected `NEXT_PUBLIC_SITE_NAME` |
 | `Dockerfile.dashboard` builds (`APP=vendor`) | yes |
+| `Dockerfile.dashboard` builds (`APP=admin-test`) | yes; distinct bundle from vendor (different asset hashes) |
+| Dashboard serves a missing asset | 404, not an index.html fallback |
 | Overlays applied in every image build | 001 + 002 applied, 003 correctly skipped |
 | 404s in the **production** storefront image | unknown product / seller / collection → **404**; `/de`, existing product, existing seller → **200** |
 | Dashboard SPA fallback on a deep route | 200, not 404 |

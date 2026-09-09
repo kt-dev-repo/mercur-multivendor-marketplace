@@ -55,6 +55,10 @@ separate compose projects (`podman compose ls`).
 | Service | Container | URL | Volume |
 |---|---|---|---|
 | Postgres 16 | `mercur-postgres` | `postgres://mercur:mercur@localhost:5432/mercur` | `mercur-pgdata` |
+
+On first initialisation Postgres also runs `deploy/local/initdb/`, which creates
+the `postgres` superuser the integration test harness requires.
+
 | Redis 7 | `mercur-redis` | `redis://localhost:6379` | `mercur-redisdata` |
 
 Per-service control:
@@ -202,7 +206,15 @@ curl -X POST "http://localhost:9000/store/carts/$CART/line-items" \
 2. **Integration tests need a `postgres` superuser.** `integration-tests/.env.test`
    hardcodes `postgres:postgres@localhost:5432`, and `@medusajs/test-utils` builds
    its connection from `DB_*`, not `DATABASE_URL`. The runner creates and drops
-   databases, so add the role to the server instead of editing that tracked file:
+   databases, so the role needs `SUPERUSER CREATEDB`.
+
+   **Handled automatically.** `docker-compose.postgres.yml` mounts
+   `deploy/local/initdb/` into `/docker-entrypoint-initdb.d`, so the role is
+   created when the data directory is first initialised — no manual step, and no
+   edit to the tracked `.env.test`.
+
+   It runs **only on first init**. On a volume created before this was added,
+   add the role once by hand:
 
    ```bash
    podman exec mercur-postgres psql -U mercur -d mercur \
