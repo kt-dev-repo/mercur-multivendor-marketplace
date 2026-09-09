@@ -119,6 +119,10 @@ cd apps/vendor     && bun run dev                                       # :7002 
 9. **`STORE_CORS` in `templates/basic/packages/api/.env.template` lists `:8000`, not `:3000`.** The storefront runs on `:3000`, so the template value alone blocks it.
 10. **Two zod majors coexist.** Root pins `zod@3.25.76` (backend/validators); several dashboard packages declare `zod@4.4.3`. Match the workspace you are editing.
 11. **Medusa is pinned to 2.20.1 by root `overrides`.** Do not bump it in a single workspace.
+12. **The storefront soft-404s.** Unknown product, seller and collection handles return HTTP **200**, not 404 — `ProductDetailsPage.tsx` does `if (!prod) return null` and the seller/collection pages return `{}` / render `<NotFound />` without a status. Only `categories/[category]/page.tsx` calls `notFound()`. Search engines will index empty pages.
+13. **`medusa build` crashes under the bun runtime on Linux.** MikroORM reads decorator positions off stack traces via source-map-support and throws ``` `column` must be greater than or equal to 0 ```. Install with bun; run medusa (and next/vite in images) with Node.
+14. **Workspace binaries are not hoisted.** Under bun's isolated layout `medusa` and `vite` live in each workspace's own `node_modules/.bin`, not the repo root.
+15. **Store `shipping-options` are keyed by seller.** `GET /store/shipping-options?cart_id=…` returns an object mapping `seller_id -> options[]`, not a flat array. A multi-seller cart needs one shipping method added **per seller** before it can complete.
 
 ## Repo Working Rules (from CLAUDE.md — these are enforced)
 

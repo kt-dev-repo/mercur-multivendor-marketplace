@@ -1,0 +1,89 @@
+# Mercur API (Medusa) — production image for Dokploy.
+# Build context MUST be the repository root:
+#   docker build -f deploy/dokploy/Dockerfile.api .
+#
+# Two non-obvious decisions, both load-bearing:
+#
+# 1) Bun installs, Node runs. The repo ships a bun.lock and bun workspaces, so
+#    bun is the only correct installer. But `medusa build` CRASHES under the bun
+#    runtime on Linux — MikroORM reads decorator positions off stack traces via
+#    source-map-support, and under bun that throws
+#    "`column` must be greater than or equal to 0". So every medusa invocation
+#    here goes through Node.
+#
+# 2) The workspace overlay at the end. apps/api declares "@mercurjs/core": "*",
+#    so installing inside the Medusa build output resolves it from the npm
+#    registry and can pull an OLDER published package than this checkout. The
+#    published 2.3.3 caps its core-flows patch at <2.19.0 while this repo pins
+#    @medusajs/core-flows 2.20.1, and withMercur() then throws at config load:
+#      [mercur] Patch "@medusajs+core-flows@2.18.0.patch" was generated against
+#      @medusajs/core-flows >=2.17.0 <2.19.0, but 2.20.1 is what this project resolves
+#    Copying the workspace packages over the installed ones fixes it.
+#    Do not remove that step.
+
+FROM node:22-bookworm-slim AS base
+COPY --from=oven/bun:1.3.8 /usr/local/bin/bun /usr/local/bin/bun
+RUN bun --version && node --version
+
+FROM base AS deps
+WORKDIR /repo
+COPY package.json bun.lock ./
+# Root config the workspaces resolve at build time. eslint.config.mts in
+# particular: apps/storefront ships NO local eslint config, so without the root
+# flat config `next build` lints with the default parser and dies on every
+# TypeScript file ("Parsing error: The keyword 'export' is reserved").
+COPY .npmrc .oxlintrc.json eslint.config.mts ./
+COPY apps ./apps
+COPY packages ./packages
+# The root workspaces list includes integration-tests, e2e-tests AND
+# e2e-tests/hosts/*. Copy those trees whole — omitting any workspace makes
+# `bun install --frozen-lockfile` reject the lockfile as changed.
+COPY integration-tests ./integration-tests
+COPY e2e-tests ./e2e-tests
+COPY turbo.json ./turbo.json
+# --ignore-scripts: better-sqlite3 is an OPTIONAL PEER of @mikro-orm/knex
+# (alongside libsql and mariadb). Mercur runs on Postgres and never loads it, and
+# it is not a dependency of the built server — but its install script shells out
+# to node-gyp, which needs python3/make/g++ that this slim image does not carry,
+# so it fails the whole install. Nothing here needs a lifecycle script.
+RUN bun install --frozen-lockfile --ignore-scripts
+
+FROM deps AS build
+WORKDIR /repo
+# Workspace packages must be built before the API compiles against them.
+RUN bun run build --filter=@mercurjs/types --filter=@mercurjs/client \
+                  --filter=@mercurjs/cli   --filter=@mercurjs/core
+WORKDIR /repo/apps/api
+# `medusa build` reports TypeScript errors from apps/api/src/scripts/** — dev-only
+# seed utilities — and still emits a complete server. Tolerate those, then assert
+# the artifact exists so a genuinely broken build still fails the image.
+RUN node ./node_modules/.bin/medusa build || true
+RUN test -f .medusa/server/medusa-config.js || (echo "medusa build produced no server" && exit 1)
+
+FROM base AS runtime
+ENV NODE_ENV=production
+WORKDIR /app
+COPY --from=build /repo/apps/api/.medusa/server ./
+RUN bun install --production --ignore-scripts
+
+COPY --from=build /repo/packages/core   /tmp/ws/core
+COPY --from=build /repo/packages/types  /tmp/ws/types
+COPY --from=build /repo/packages/client /tmp/ws/client
+COPY --from=build /repo/packages/cli    /tmp/ws/cli
+RUN set -eux; \
+    for p in core types client cli; do \
+      if [ -d "/app/node_modules/@mercurjs/$p" ] && [ -d "/tmp/ws/$p" ]; then \
+        rm -rf "/tmp/ws/$p/node_modules"; \
+        cp -a "/tmp/ws/$p/." "/app/node_modules/@mercurjs/$p/"; \
+      fi; \
+    done; \
+    rm -rf /tmp/ws; \
+    node -e "console.log('overlaid @mercurjs/core =', require('/app/node_modules/@mercurjs/core/package.json').version)"
+
+COPY deploy/dokploy/entrypoint-api.sh /usr/local/bin/entrypoint-api.sh
+RUN chmod +x /usr/local/bin/entrypoint-api.sh
+
+EXPOSE 9000
+HEALTHCHECK --interval=15s --timeout=5s --start-period=120s --retries=10 \
+  CMD node -e "fetch('http://127.0.0.1:9000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+ENTRYPOINT ["/usr/local/bin/entrypoint-api.sh"]

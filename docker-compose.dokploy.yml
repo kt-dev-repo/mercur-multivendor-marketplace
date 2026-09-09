@@ -1,0 +1,125 @@
+# Mercur marketplace — Dokploy Compose stack.
+#
+# In Dokploy: create a "Compose" service, point it at this repo, set the compose
+# path to docker-compose.dokploy.yml, paste deploy/dokploy/.env.example into the
+# Environment tab and fill it in, then Deploy.
+#
+# Do NOT publish host ports here. Dokploy routes traffic through its own Traefik
+# using the domains you attach to each service in the UI.
+#
+# Read deploy/dokploy/README.md before the first deploy — the storefront and
+# dashboards bake their public URLs in at BUILD time, so the order of operations
+# matters.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  api:
+    build:
+      context: .
+      dockerfile: deploy/dokploy/Dockerfile.api
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      COOKIE_SECRET: ${COOKIE_SECRET}
+      STORE_CORS: ${STORE_CORS}
+      ADMIN_CORS: ${ADMIN_CORS}
+      VENDOR_CORS: ${VENDOR_CORS}
+      AUTH_CORS: ${AUTH_CORS}
+      MERCUR_VENDOR_URL: ${VENDOR_PUBLIC_URL}
+      STOREFRONT_REVALIDATE_URL: ${STOREFRONT_PUBLIC_URL}
+      STOREFRONT_REVALIDATE_SECRET: ${REVALIDATE_SECRET}
+      # The local file provider bakes this origin into every uploaded file URL.
+      # It must be the public API origin or images resolve to a broken host.
+      FILE_BACKEND_URL: ${API_PUBLIC_URL}/static
+      PORT: 9000
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      RUN_SEED: ${RUN_SEED:-false}
+    volumes:
+      # Uploads written by the local file provider. Without this they vanish on
+      # every redeploy. Swap the provider for S3 in production if you can.
+      - uploads:/app/static
+    expose:
+      - "9000"
+
+  storefront:
+    build:
+      context: .
+      dockerfile: deploy/dokploy/Dockerfile.storefront
+      args:
+        MEDUSA_BACKEND_URL: ${API_PUBLIC_URL}
+        NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY: ${NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY}
+        NEXT_PUBLIC_BASE_URL: ${STOREFRONT_PUBLIC_URL}
+        NEXT_PUBLIC_DEFAULT_REGION: ${NEXT_PUBLIC_DEFAULT_REGION:-de}
+        NEXT_PUBLIC_STRIPE_KEY: ${NEXT_PUBLIC_STRIPE_KEY}
+        NEXT_PUBLIC_SITE_NAME: ${NEXT_PUBLIC_SITE_NAME}
+        NEXT_PUBLIC_SITE_DESCRIPTION: ${NEXT_PUBLIC_SITE_DESCRIPTION}
+        NEXT_PUBLIC_VENDOR_URL: ${VENDOR_PUBLIC_URL}
+        REVALIDATE_SECRET: ${REVALIDATE_SECRET}
+    restart: unless-stopped
+    depends_on:
+      api: { condition: service_started }
+    environment:
+      MEDUSA_BACKEND_URL: ${API_PUBLIC_URL}
+      REVALIDATE_SECRET: ${REVALIDATE_SECRET}
+    expose:
+      - "3000"
+
+  vendor:
+    build:
+      context: .
+      dockerfile: deploy/dokploy/Dockerfile.dashboard
+      args:
+        APP: vendor
+        VITE_MERCUR_BACKEND_URL: ${API_PUBLIC_URL}
+    restart: unless-stopped
+    expose:
+      - "80"
+
+  admin:
+    build:
+      context: .
+      dockerfile: deploy/dokploy/Dockerfile.dashboard
+      args:
+        APP: admin-test
+        VITE_MERCUR_BACKEND_URL: ${API_PUBLIC_URL}
+    restart: unless-stopped
+    expose:
+      - "80"
+
+volumes:
+  pgdata:
+  redisdata:
+  uploads:

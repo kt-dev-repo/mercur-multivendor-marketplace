@@ -1,0 +1,32 @@
+# Build context hygiene for the Dokploy images (deploy/dokploy/*).
+# Without this, COPY apps ./apps drags in local node_modules and build output,
+# which both bloats the context and lets host-built artifacts shadow the ones
+# the image builds itself.
+
+**/node_modules
+**/.next
+**/.medusa
+**/dist
+**/.turbo
+**/coverage
+**/.cache
+
+.git
+.github
+.vscode
+.claude
+.agents
+
+# Local env — never bake secrets into an image.
+**/.env
+**/.env.local
+**/.env.*.local
+
+# Local-only tooling and docs
+docker-compose.postgres.yml
+docker-compose.redis.yml
+LOCAL-SETUP.md
+CLAUDE.local.md
+
+**/.DS_Store
+**/*.log
