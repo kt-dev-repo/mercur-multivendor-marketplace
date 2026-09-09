@@ -1,0 +1,43 @@
+# Local-only data stores for Mercur development.
+# Not part of upstream mercurjs/mercur — kept untracked via .git/info/exclude.
+#
+#   docker compose -f docker-compose.local.yml up -d
+#   docker compose -f docker-compose.local.yml down        # keep data
+#   docker compose -f docker-compose.local.yml down -v     # wipe data
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: mercur-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mercur
+      POSTGRES_PASSWORD: mercur
+      POSTGRES_DB: mercur
+    ports:
+      - "5432:5432"
+    volumes:
+      - mercur-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mercur -d mercur"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: mercur-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - mercur-redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  mercur-pgdata:
+  mercur-redisdata:
