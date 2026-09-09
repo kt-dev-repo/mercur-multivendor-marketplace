@@ -23,8 +23,7 @@
 **/.env.*.local
 
 # Local-only tooling and docs
-docker-compose.postgres.yml
-docker-compose.redis.yml
+docker-compose.*.yml
 LOCAL-SETUP.md
 CLAUDE.local.md
 

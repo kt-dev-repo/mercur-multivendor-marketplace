@@ -6,9 +6,18 @@ commit.
 ## Why
 
 `main` is a byte-identical mirror of `mercurjs/mercur`. Nothing upstream owns is
-ever modified in a commit, so `git diff upstream/main` shows only added files and
-`git merge upstream/main` can never conflict — upstream releases can be pulled in
-forever at zero cost.
+ever modified in a commit, so the diff against our upstream base shows only added
+files and `git merge upstream/main` can never conflict — upstream releases can be
+pulled in forever at zero cost.
+
+```bash
+# Verify the invariant. Compare against the upstream commit we are BASED on,
+# not upstream/main — once upstream advances, its tip differs from our base and
+# a plain `git diff upstream/main` reports upstream's own changes as if they
+# were ours.
+git diff --diff-filter=MDR --name-only "$(git merge-base HEAD upstream/main)"
+# empty output = no upstream-tracked file was modified
+```
 
 That guarantee would be lost the moment a fix edited an upstream file. So fixes
 live here as patches and are applied **on a copy**: inside the container image at

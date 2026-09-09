@@ -121,6 +121,28 @@ Docker network.
 `localhost` in `DATABASE_URL` or `REDIS_URL` refers to the **API container
 itself** and is the single most common cause of a failed deploy.
 
+### Optional: keep storefront SSR traffic internal
+
+`MEDUSA_BACKEND_URL` is read only by the storefront's **server** code
+(`'use server'` modules and `middleware.ts`). It is deliberately not
+`NEXT_PUBLIC_`, so it is never inlined into the browser bundle — the one helper
+that would have leaked it into markup, `getImageUrl`, is dead code and imported
+nowhere.
+
+So it may point at the API **internally** instead of at the public domain:
+
+```yaml
+    environment:
+      MEDUSA_BACKEND_URL: http://api:9000
+```
+
+That keeps server-side rendering off Traefik and works even when the host cannot
+resolve its own public domain (no hairpin NAT). The default stays
+`${API_PUBLIC_URL}` because it is unconditionally correct: `api` is a compose
+service alias, and on a *shared* network another stack exposing the same service
+name could shadow it. Switch only if you know the alias is unambiguous, and
+change nothing else — the browser never uses this value.
+
 ### Build-time vs runtime
 
 | Variable | When it takes effect |

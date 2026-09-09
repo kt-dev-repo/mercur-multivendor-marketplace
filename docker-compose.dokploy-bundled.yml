@@ -86,6 +86,11 @@ services:
       ADMIN_EMAIL: ${ADMIN_EMAIL}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       RUN_SEED: ${RUN_SEED:-false}
+      # Kept in parity with docker-compose.dokploy.yml. depends_on already
+      # orders startup here, but the entrypoint still waits, and Medusa's
+      # pre-migration probe can abort a reachable database at its 10s default.
+      WAIT_TIMEOUT: ${WAIT_TIMEOUT:-120}
+      MEDUSA_DB_MIGRATION_CONNECTION_TIMEOUT: ${MEDUSA_DB_MIGRATION_CONNECTION_TIMEOUT:-30000}
     volumes:
       # Uploads written by the local file provider. Without this they vanish on
       # every redeploy. Swap the provider for S3 in production if you can.

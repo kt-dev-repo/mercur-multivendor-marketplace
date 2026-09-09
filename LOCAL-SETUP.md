@@ -237,8 +237,17 @@ git push -u origin main
 ```
 
 `main` = upstream history at `da34c523f` plus one commit adding local tooling.
-No upstream-tracked file is modified, so `git diff upstream/main` shows only
-added files and future `git merge upstream/main` cannot conflict.
+No upstream-tracked file is modified, so the diff against our upstream base
+shows only added files and `git merge upstream/main` cannot conflict.
+
+```bash
+# Verify the invariant. Compare against the upstream commit we are BASED on,
+# not upstream/main — once upstream advances, its tip differs from our base and
+# a plain `git diff upstream/main` reports upstream's own changes as if they
+# were ours.
+git diff --diff-filter=MDR --name-only "$(git merge-base HEAD upstream/main)"
+# empty output = no upstream-tracked file was modified
+```
 
 ## Troubleshooting
 

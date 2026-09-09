@@ -15,8 +15,17 @@ A **pristine mirror** of `mercurjs/mercur` `main`, cloned at `da34c523f`
 | `upstream` | `https://github.com/mercurjs/mercur.git` (push disabled) |
 
 **Standing rule: never modify an upstream-tracked file.** Everything added here
-is a *new* file sitting beside upstream ones, so `git diff upstream/main` shows
-only additions and `git merge upstream/main` can never conflict.
+is a *new* file sitting beside upstream ones, so the diff against our upstream
+base shows only additions and `git merge upstream/main` can never conflict.
+
+```bash
+# Verify the invariant. Compare against the upstream commit we are BASED on,
+# not upstream/main — once upstream advances, its tip differs from our base and
+# a plain `git diff upstream/main` reports upstream's own changes as if they
+# were ours.
+git diff --diff-filter=MDR --name-only "$(git merge-base HEAD upstream/main)"
+# empty output = no upstream-tracked file was modified
+```
 
 Local additions (committed on `main`):
 - `docker-compose.postgres.yml`, `docker-compose.redis.yml` — Postgres 16 and
