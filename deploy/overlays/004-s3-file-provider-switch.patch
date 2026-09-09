@@ -1,0 +1,99 @@
+diff --git a/apps/api/medusa-config.ts b/apps/api/medusa-config.ts
+index 52f74a7aa..aa0ac7593 100644
+--- a/apps/api/medusa-config.ts
++++ b/apps/api/medusa-config.ts
+@@ -5,6 +5,74 @@ loadEnv(process.env.NODE_ENV || 'development', process.cwd())
+ 
+ const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379'
+ 
++// File storage: S3 when a bucket is configured, otherwise the local provider.
++//
++// The local provider writes to the container filesystem and bakes its origin
++// into every stored file URL, so it needs a persistent volume, cannot be shared
++// across API replicas, and breaks if the public origin changes. S3 (or any
++// S3-compatible service: MinIO, Cloudflare R2, DigitalOcean Spaces, Backblaze
++// B2) removes all three limits.
++//
++// Setting S3_BUCKET switches providers. Nothing else has to change — the
++// provider id stays the default one Medusa resolves for uploads.
++const S3_BUCKET = process.env.S3_BUCKET
++
++// MinIO and other path-style services need this; real AWS S3 does not.
++const s3ClientConfig = {
++  ...(process.env.S3_FORCE_PATH_STYLE === 'true' ? { forcePathStyle: true } : {}),
++  ...(process.env.S3_ADDITIONAL_CLIENT_CONFIG
++    ? JSON.parse(process.env.S3_ADDITIONAL_CLIENT_CONFIG)
++    : {}),
++}
++
++// Buckets with Object Ownership "BucketOwnerEnforced" (the AWS default since
++// 2023) and R2 reject any ACL header. Send S3_ACL=false there; the SDK then
++// omits it entirely. Otherwise pass a canned ACL such as `public-read`.
++const s3Acl =
++  process.env.S3_ACL === 'false' ? false : process.env.S3_ACL || undefined
++
++const fileProviders = S3_BUCKET
++  ? [
++      {
++        resolve: '@medusajs/medusa/file-s3',
++        id: 's3',
++        options: {
++          // Public base URL objects are served from. For AWS this is the bucket
++          // or CloudFront origin; for MinIO the gateway URL including the
++          // bucket. Stored file URLs are built from it, so it must be the
++          // publicly reachable origin.
++          file_url: process.env.S3_FILE_URL,
++          bucket: S3_BUCKET,
++          region: process.env.S3_REGION,
++          // Required for every non-AWS S3-compatible service.
++          endpoint: process.env.S3_ENDPOINT,
++          // Omit both keys to use the instance role (IRSA, EC2 instance
++          // profile) with S3_AUTHENTICATION_METHOD=s3-iam-role.
++          access_key_id: process.env.S3_ACCESS_KEY_ID,
++          secret_access_key: process.env.S3_SECRET_ACCESS_KEY,
++          authentication_method: process.env.S3_AUTHENTICATION_METHOD,
++          prefix: process.env.S3_PREFIX,
++          cache_control: process.env.S3_CACHE_CONTROL,
++          ...(s3Acl !== undefined ? { acl: s3Acl } : {}),
++          ...(Object.keys(s3ClientConfig).length
++            ? { additional_client_config: s3ClientConfig }
++            : {}),
++        },
++      },
++    ]
++  : [
++      {
++        resolve: '@medusajs/medusa/file-local',
++        id: 'local',
++        options: {
++          // The local provider bakes this into every uploaded file URL.
++          // It must be the publicly reachable origin in production, or
++          // images resolve to localhost and render broken.
++          backend_url: process.env.FILE_BACKEND_URL || 'http://localhost:9000/static',
++        },
++      },
++    ]
++
+ module.exports = withMercur({
+   projectConfig: {
+     databaseUrl: process.env.DATABASE_URL,
+@@ -66,18 +134,7 @@ module.exports = withMercur({
+     {
+       resolve: '@medusajs/medusa/file',
+       options: {
+-        providers: [
+-          {
+-            resolve: '@medusajs/medusa/file-local',
+-            id: 'local',
+-            options: {
+-              // The local provider bakes this into every uploaded file URL.
+-              // It must be the publicly reachable origin in production, or
+-              // images resolve to localhost and render broken.
+-              backend_url: process.env.FILE_BACKEND_URL || 'http://localhost:9000/static',
+-            },
+-          },
+-        ],
++        providers: fileProviders,
+       },
+     },
+   ],

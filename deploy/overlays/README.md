@@ -82,6 +82,34 @@ script assigns a free port per worktree.
 
 Docs only. Skipped inside images, which do not copy `docs/` or `CLAUDE.md`.
 
+### `004-s3-file-provider-switch.patch`
+
+`apps/api/medusa-config.ts` hardcoded Medusa's **local** file provider. That
+writes to the container filesystem, bakes its origin into every stored file URL,
+cannot be shared across API replicas, and breaks when the public origin changes.
+
+Makes the provider a switch driven by env: **`S3_BUCKET` set → S3, otherwise
+local**, so local development is unchanged and production opts in without a code
+change. Resolve string is `@medusajs/medusa/file-s3` — note `@medusajs/file-s3`
+is NOT resolvable from `apps/api` under bun's isolated layout, only the path
+re-exported through `@medusajs/medusa`.
+
+Handles the awkward parts of real S3-compatible services:
+
+| Variable | Why it exists |
+|---|---|
+| `S3_ENDPOINT` | required by everything that is not real AWS |
+| `S3_FORCE_PATH_STYLE` | MinIO and other path-style services |
+| `S3_ACL=false` | buckets that reject ACL headers — AWS Object Ownership `BucketOwnerEnforced` (default since 2023) and Cloudflare R2 |
+| `S3_AUTHENTICATION_METHOD=s3-iam-role` | instance roles / IRSA, with both keys omitted |
+| `S3_ADDITIONAL_CLIENT_CONFIG` | raw JSON escape hatch into the S3 client |
+
+Verified against MinIO: with `S3_BUCKET` set the API booted clean, `/admin/uploads`
+returned an `S3_FILE_URL`-based URL, the object appeared in the bucket, and
+fetching that URL returned the exact bytes. Removing `S3_BUCKET` reverted to
+`http://localhost:9000/static/...` and local uploads still served correctly — the
+switch works in both directions with no code change.
+
 ## Adding an overlay
 
 1. Edit the upstream file in a checkout and verify the change works.

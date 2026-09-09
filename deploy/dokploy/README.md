@@ -204,12 +204,20 @@ scoping is enforced.
 
 ## Production hardening
 
-**File storage.** The API uses Medusa's **local** file provider, writing to the
-`uploads` volume. That volume keeps uploads across redeploys, but it does not
-survive moving hosts and does not scale past one API replica. For real traffic,
-switch to S3 in `apps/api/medusa-config.ts` — note that is an **upstream-tracked
-file**, so changing it breaks the clean-merge property. Prefer a small overlay or
-an upstream PR.
+**File storage.** Set `S3_BUCKET` and the API switches from the local provider to
+S3 — no code change, no rebuild, just environment. Overlay `004` makes the
+provider selection env-driven; see `deploy/overlays/README.md` for the full
+variable list.
+
+Do this before real traffic. The local provider writes to the `uploads` volume,
+which survives redeploys but not a host move, cannot be shared across API
+replicas, and bakes the public origin into every stored URL — so changing your
+domain breaks every existing image.
+
+Works with AWS S3, Cloudflare R2, DigitalOcean Spaces, Backblaze B2 and MinIO.
+Two settings catch people out: everything except real AWS needs `S3_ENDPOINT`,
+and buckets with AWS Object Ownership `BucketOwnerEnforced` (the default since
+2023) or R2 reject ACL headers — send `S3_ACL=false` there.
 
 **Payments.** `pp_system_default` is a stub that authorises everything. Configure
 Stripe (and Stripe Connect for payouts, `packages/providers/payout-stripe-connect`)
@@ -237,7 +245,10 @@ drops in-flight workflow state. Appendonly persistence is on.
 | Dashboard 404s on refresh of a sub-route | SPA fallback missing — `nginx-spa.conf` must be present in the image. |
 | `db:migrate` cannot connect | `postgres` unhealthy. Check its logs and that `POSTGRES_*` match `DATABASE_URL`. |
 | Build OOM-killed | Under 4 GB RAM. Increase the build host, or build images in CI and deploy by tag. |
-| Uploaded images 404 | `FILE_BACKEND_URL` must be `${API_PUBLIC_URL}/static`. |
+| Uploaded images 404 (local provider) | `FILE_BACKEND_URL` must be `${API_PUBLIC_URL}/static`. |
+| S3 uploads fail with `AccessDenied` on the ACL | set `S3_ACL=false` (BucketOwnerEnforced / R2). |
+| S3 uploads fail with a DNS or signature error | non-AWS service needs `S3_ENDPOINT`, and usually `S3_FORCE_PATH_STYLE=true`. |
+| Images still resolve to `/static` after setting S3 | `S3_BUCKET` empty or not reaching the container; check the api service env. |
 | Seed data duplicated | `RUN_SEED` left `true`. Set false and redeploy. |
 | `ERR_WORKER_OUT_OF_MEMORY` during build | Build host under 6 GB RAM. |
 | `Parsing error: The keyword 'export' is reserved` | Root `eslint.config.mts` missing from the build context. |
@@ -264,7 +275,8 @@ written:
 | `Dockerfile.dashboard` builds (`APP=vendor`) | yes |
 | `Dockerfile.dashboard` builds (`APP=admin-test`) | yes; distinct bundle from vendor (different asset hashes) |
 | Dashboard serves a missing asset | 404, not an index.html fallback |
-| Overlays applied in every image build | 001 + 002 applied, 003 correctly skipped |
+| Overlays applied in every image build | 001 + 002 + 004 applied, 003 correctly skipped |
+| S3 provider switch (overlay 004) against MinIO | upload → object in bucket → fetched back byte-identical; unsetting `S3_BUCKET` reverts to local |
 | 404s in the **production** storefront image | unknown product / seller / collection → **404**; `/de`, existing product, existing seller → **200** |
 | Dashboard SPA fallback on a deep route | 200, not 404 |
 | `VITE_MERCUR_BACKEND_URL` baked into the bundle | found in `assets/*.js` |
