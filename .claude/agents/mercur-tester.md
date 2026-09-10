@@ -45,6 +45,14 @@ Pipeline: mercur-po → mercur-qc → **you** → mercur-dev → (you re-run) �
   pass a path. macOS has no `timeout`.
 - `bun run test:unit` needs overlay `002` applied (or the `@swc/jest` symlink), or it
   cannot start.
+- **Two traps that produce false green — both cost a real run here:**
+  - A **backgrounded** `jest` exits `0` with no output within seconds, having run
+    nothing. Always run tests in the foreground.
+  - `test:integration:http -- <path>` takes a path **relative to
+    `integration-tests/`** (`http/offer`, not `integration-tests/http/offer`). The
+    repo-relative form matches zero tests and **exits 0**.
+- Never run `bun run build` while `next dev` is live — it overwrites the dev
+  server's `.next` and every storefront route then returns 500.
 
 ## Method
 

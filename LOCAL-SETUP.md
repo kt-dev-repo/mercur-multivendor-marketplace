@@ -260,5 +260,8 @@ git diff --diff-filter=MDR --name-only "$(git merge-base HEAD upstream/main)"
 | `@swc/jest ... not found` | `./deploy/overlays/apply.sh --only 002` |
 | unknown product/seller URL returns 200 | `./deploy/overlays/apply.sh --only 001` (images apply it automatically) |
 | `Field 'offer_id' is required` | use `offer_id` from `product.variants[].offer_id`, not `variant_id` |
+| Storefront returns `500 Internal Server Error` on every route | a production `bun run build` overwrote the running dev server's `.next`. `kill` the dev server, `rm -rf apps/storefront/.next`, restart. **Never run `bun run build` while `next dev` is running.** |
+| Integration tests "pass" instantly with no output | the run was backgrounded — jest exits 0 having run nothing. Always foreground it. |
+| A test pattern matches zero tests but exits 0 | `test:integration:http -- <path>` takes a path **relative to `integration-tests/`** (`http/offer`, not `integration-tests/http/offer`). |
 | Duplicate `@medusajs/*` versions | root `overrides` pin 2.20.1 — never bump per-workspace |
 | Port already in use | `lsof -ti tcp:<port>` then kill |

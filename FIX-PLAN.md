@@ -38,21 +38,194 @@ overlay and passes with it → `git diff` against merge-base still empty.
 
 ---
 
-## §0 Runtime confirmation — TO BE FILLED FROM THE TESTER RUN
+## §0 Runtime results — COMPLETE (2026-09-10)
 
-| ID | Static claim | Exploitable at runtime? | Evidence |
-|----|--------------|-------------------------|----------|
-| C1 | cross-tenant inventory write | *pending* | |
-| C2 | unscoped `delete` arrays | *pending* | |
-| H1 | any vendor edits any collection | *pending* | |
+Live stack, 414 integration tests across 6 groups (**0 failures**), plus targeted
+exploitation. **Every finding below is invisible to the existing test suites.**
 
-If C1 is confirmed exploitable, it is an **upstream security issue**: report it to
-mercurjs privately before any public write-up, and treat the overlay as a
-stop-gap, not the fix of record.
+### Static findings, re-tested at runtime
+
+| ID | Static claim | Runtime verdict |
+|----|--------------|-----------------|
+| C1 | cross-tenant inventory write via flat batch route | **Not reachable as described** — but a worse variant is: see P0.4 |
+| C2 | unscoped `delete` arrays | **Unproven** — seller link tables for those families are empty, no seller-B resources existed to attack |
+| H1 | any vendor edits any collection | **Unproven** — same reason |
+| H4 | seller visibility predicate | not exercised (no closed sellers seeded) |
+
+So the static P1 items are **not** the top priority. The runtime pass found four
+worse defects, two of them unauthenticated and directly monetary.
+
+### What the suites prove, and what that says about them
+
+171/171 vendor and 68/68 admin routes reject unauthenticated requests. All 21 store
+routes enforce the publishable key. `x-seller-id` spoofing is blocked —
+`ensureSellerMiddleware` verifies membership. Cross-tenant scoping is correct for
+offers, orders, sellers, shipping-options and stock-locations (all 404). Line-item
+input validation is solid: 14/15 malformed payloads returned clean 400/404,
+including SQL-ish ids; no injection, no stack-trace leaks. 8 parallel line-item
+adds produced exactly one item at qty 8 — the cart lock works.
+
+**414 tests passed and none of the P0 defects below were caught.** The gap is not
+coverage of the happy path; it is the absence of adversarial tests. Fixes must ship
+with tests that would have caught these.
 
 ---
 
-## Priority 1 — Cross-tenant writes (do first, in one pass)
+## Priority 0 — CONFIRMED EXPLOITS, unauthenticated and monetary
+
+These displace everything below. Both P0.1 and P0.2 are reachable by anyone with
+the publishable key, which is public by design.
+
+### P0.1 — Customers set their own prices **[VERIFIED BY HAND — €220 sold for €5]**
+
+`packages/core/src/api/store/carts/[id]/line-items/validators.ts` exposes
+`unit_price` and `compare_at_unit_price` on the **public** store route:
+
+```ts
+export const StoreAddCartLineItem = z.object({
+  offer_id: z.string().min(1),
+  quantity: z.number().int().positive(),
+  unit_price: z.number().optional(),            // customer-controlled price
+  compare_at_unit_price: z.number().optional(),
+  ...
+}).strict()
+```
+
+`route.ts:15` destructures only `additional_data, metadata, offer_id`, so both
+fields land in `...item` and are spread into `items:` for `addToCartWorkflow`.
+Medusa's own store API deliberately never exposes `unit_price` — it is
+admin/draft-order only.
+
+My own reproduction on the live stack, same offer, same quantity:
+
+```
+no unit_price      -> qty=5 unit_price=44 subtotal=220 total=220
+unit_price: 1      -> qty=5 unit_price=1  subtotal=5   TOTAL=5 eur
+```
+
+The tester drove it through to a completed order: `order_group` total **15**,
+payment collection for **15**, order row `qty 5 | unit_price 1`. 220 EUR of goods
+sold for 5.
+
+*Fix:* remove both fields from the store validator. `.strict()` then rejects them
+outright. Price must resolve server-side from the offer. Two lines.
+*Also:* `unit_price: -100` returns **HTTP 500** — fix with the same change.
+
+### P0.2 — Cart completion is not idempotent: one cart, unlimited orders **[VERIFIED BY HAND]**
+
+`POST /store/carts/:id/complete` creates a **new** `order_group` on every call.
+Deterministic with two **sequential** requests — no race needed.
+
+My reproduction:
+```
+complete #1 -> order_group og_01M249S0H2QGFJ6NDMMV8F46Y6
+complete #2 -> order_group og_01M249S0P540NHKQ1JJH3FCPQW   (same cart)
+DB: order_groups=2  orders=2  cart.completed_at=t
+```
+Tester's 5-parallel run: 5 order groups, 10 orders, 8 commission lines, against
+**one** payment of 192 EUR, with `reserved_quantity` triple-counted.
+
+The guard exists and never fires —
+`packages/core/src/workflows/cart/workflows/complete-cart-with-split-orders.ts`
+declares `idempotent: false`, takes `acquireLockStep({ key: input.cart_id })`, then
+gates creation on `when(..., ({ orderGroupId }) => !orderGroupId)`. `completed_at`
+**is** written but never checked, and the order-group-by-cart_id lookup resolves to
+nothing on re-entry, so the create branch always runs.
+
+*Impact:* a customer refreshing the confirmation page duplicates their order.
+Sellers get duplicate fulfillment obligations and duplicate commission lines
+against a single payment.
+
+*Fix:* reject in the route when `cart.completed_at` is set (409), **and** repair the
+re-entry guard in the workflow so the lock actually protects. Do both — the route
+check alone still loses a true concurrent race.
+
+### P0.3 — Vendor A modifies vendor B's product, and it applies **[tester-verified end to end]**
+
+`POST /vendor/products/:id` has no ownership check.
+`api/vendor/products/middlewares.ts` applies `applySellerProductLinkFilter` only to
+the **list** matcher; the `:id` matchers get validators and RBAC policies only — and
+**`rbac` is `false` on this instance** (`GET /vendor/feature-flags`), so every
+`policies: [...]` declaration is inert.
+
+Seller B submitted a change against seller A's draft product; `product_change.created_by`
+recorded seller B; the admin queue showed it as legitimate; on confirm the title
+became `PWNED-BY-SELLER-B`. Seller A cannot cancel it.
+
+*Fix:* assert product ownership on the `:id` write routes, independent of RBAC.
+**Never rely on a feature-flagged policy as the only tenant boundary.**
+
+### P0.4 — All inventory items belong to one seller **[VERIFIED BY HAND]**
+
+```
+inventory_inventory_item_seller_seller:  Peak & Pace = 1144   (only seller present)
+offers per seller:  Kickz 240, Urban Step 237, Peak & Pace 226, Trailhead 222, Sole Society 219
+```
+
+Two defects at once: **4 of 5 sellers cannot manage their own inventory at all**,
+and the fifth can read and zero every competitor's stock. The tester set a
+competitor's `stocked_quantity` from 1,000,000 to 0 through a legitimately-scoped
+route, then restored it.
+
+The API's ownership check is **correct here** — the link data is wrong. Likely the
+seeder, but **triage the production provisioning path before assuming that**: if
+offer creation links inventory to the wrong seller, live data is affected too.
+
+### P0.5 — Unauthenticated `GET /store/orders/:id` leaks PII **[VERIFIED BY HAND]**
+
+```
+curl -H "x-publishable-api-key: $PK" /store/orders/order_01M22D42YFPQ8TVESVJPXQZCSM
+-> 200  email, full name, street, city, postcode, total
+```
+Controls behave correctly: `/store/orders` list → **401**, `/store/order-groups/:id`
+→ **401**. The guard was simply missed on this one route. Ids are ULIDs so not
+trivially enumerable, but this is broken access control on customer PII.
+
+*Fix:* filter on `req.auth_context.actor_id` as the sibling routes do.
+
+### P0.6 — Unhandled 500s on trivial input, two reachable unauthenticated
+
+| Request | Observed |
+|---|---|
+| `GET /store/products?limit=-1` | **500** (public) |
+| `GET /store/products?order=%3Bnope` | **500** (public) |
+| `POST line-items` `unit_price:-100` | **500** (public) |
+| `GET /vendor/orders?created_at[$gt]=notadate` | **500** |
+| `GET /vendor/offers?order=../../etc/passwd` | **500** |
+
+No stack traces leak. `?limit=999999999` returns 200 **with no cap** — separate
+resource-exhaustion concern.
+
+---
+
+## Priority 0b — Ours, not upstream
+
+### P0b.1 — Running `bun run build` clobbered the dev server's `.next` **[FIXED]**
+
+The storefront served `500 Internal Server Error` on every route for ~12 hours. A
+production `next build` overwrote the running `next dev --turbopack` server's
+`.next`. Resolved by `rm -rf apps/storefront/.next` and restarting — verified 200
+with 4 product cards. **Never run `bun run build` against a live dev server**; add
+this to `LOCAL-SETUP.md` troubleshooting.
+
+### P0b.2 — Two testing traps that produce false green
+
+- **Backgrounded `jest` exits 0 with no output within seconds.** Any CI or agent
+  that detaches the test run reports success having run nothing. Always foreground.
+- **`bun run test:integration:http -- <path>` needs a path relative to
+  `integration-tests/`** (`http/offer`, not `integration-tests/http/offer`). The
+  repo-relative form silently matches zero tests and **exits 0**.
+
+Both belong in the tester agent's brief and in `LOCAL-SETUP.md`.
+
+---
+
+## Priority 1 — Cross-tenant writes (static; runtime status in §0)
+
+> Re-ranked after the runtime pass: **P0 comes first**. P1.1 was not reachable as
+> described, and P1.2/P1.3 remain unproven because the relevant seller link tables
+> are empty. Keep them scheduled — an unproven finding on a 171-route surface is not
+> a disproven one — but gate them behind a reproduction per Rule 0.
 
 These are one omission repeated, not three bugs: **routes that take a resource id
 from the request body instead of the path skipped the ownership check their
@@ -319,16 +492,30 @@ costs nothing. The upstream doc fix is overlay `003`'s territory.
 
 ---
 
-## Suggested execution order
+## Suggested execution order (revised after the runtime pass)
 
-1. **P5.2 skill correction** — free, stops the misinformation immediately.
-2. **§0** — confirm exploitability from the tester run; if C1 lands, notify upstream.
-3. **P1** — one overlay covering P1.1–P1.3, plus the P1.4 guard.
-4. **P2.1** — one line, largest financial exposure.
-5. **P2.2**, **P3.1**, **P3.3** — small, self-contained overlays.
-6. **P3.2**, **P4.\*** — ours, direct edits, no overlay needed.
-7. **P2.3 / P2.4** — need a product decision first (they change payouts).
-8. **P5.1** — track, do not overlay.
+1. **P0.1** — two-line validator change, stops unauthenticated price tampering.
+2. **P0.2** — route `completed_at` check **and** the workflow re-entry guard.
+3. **P0.5** — add the `actor_id` filter; one route, copies its siblings.
+4. **P0.3** — ownership assertion on `vendor/products/:id` writes, independent of
+   the `rbac` flag.
+5. **P0.4** — triage the provisioning path first; fix the data, then add a
+   constraint/test so the link cannot skew again.
+6. **P0.6** — input coercion on the public query params.
+7. **P0b.1 / P0b.2** — ours, documentation, free.
+8. **P5.2 skill correction** — free.
+9. **P2.1** (`@InjectTransactionManager`), **P2.2** (payout compensation) — small,
+   high financial exposure.
+10. **P1.\*** — only behind a reproduction; otherwise they are speculative.
+11. **P3.\***, **P4.\*** — hardening.
+12. **P2.3 / P2.4** — need the PO's product decision.
+13. **P5.1** — track, do not overlay.
+
+### Upstream disclosure
+
+P0.1, P0.2, P0.3 and P0.5 are **security defects in upstream Mercur**, not in our
+additions. Report them privately to mercurjs before any public write-up. Our
+overlays are stop-gaps, not the fix of record.
 
 ## Explicitly out of scope
 
