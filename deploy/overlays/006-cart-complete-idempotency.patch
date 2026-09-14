@@ -1,0 +1,91 @@
+# 006 — one cart yields at most one order group.
+#
+# Three files, one concern — the guard cannot work without all three:
+#  * repository: `OrderGroupRepository.findAndCount` is a raw-SQL override that
+#    recognises only id / customer_id / seller_id / status / sales_channel_id /
+#    created_at / updated_at / q. A `cart_id` filter was silently DROPPED, so a
+#    by-cart lookup returned the whole table. `cart_id` is now honoured.
+#  * workflow: the `order_group` lookup selected `fields: ["cart_id"]`, so
+#    `orderGroup?.data?.id` was `undefined` on every entry and the
+#    `when(!orderGroupId)` create branch always ran. Selecting `id` too makes the
+#    existing guard fire, so a racer past the route gets 200 carrying the
+#    pre-existing group. Selecting `id` WITHOUT the repository clause is worse
+#    than the bug: the guard would then match the newest group in the store and
+#    silently skip order creation for every later cart.
+#  * route: a cart with `completed_at` set now 409s before the workflow runs,
+#    which is the cheap correct answer for a refreshed confirmation page.
+#
+# Neither the route nor the workflow layer alone is sufficient: `completed_at` is
+# written inside the create branch, so five concurrent callers all read it unset.
+
+diff --git a/packages/core/src/api/store/carts/[id]/complete/route.ts b/packages/core/src/api/store/carts/[id]/complete/route.ts
+index 535c99d1a..cf9258fd8 100644
+--- a/packages/core/src/api/store/carts/[id]/complete/route.ts
++++ b/packages/core/src/api/store/carts/[id]/complete/route.ts
+@@ -12,13 +12,28 @@ export const POST = async (
+ ) => {
+     const cart_id = req.params.id
+ 
++    const query = req.scope.resolve(ContainerRegistrationKeys.QUERY)
++
++    // A cart is only stamped `completed_at` once its orders exist, so a second
++    // request (a refreshed confirmation page) must not re-enter the workflow.
++    const { data: existingCarts } = await query.graph({
++        entity: "cart",
++        fields: ["id", "completed_at"],
++        filters: { id: cart_id },
++    })
++
++    if (existingCarts[0]?.completed_at) {
++        throw new MedusaError(
++            MedusaError.Types.CONFLICT,
++            `Cart ${cart_id} has already been completed`
++        )
++    }
++
+     const { errors, result } = await completeCartWithSplitOrdersWorkflow(req.scope).run({
+         input: { cart_id },
+         throwOnError: false,
+     })
+ 
+-    const query = req.scope.resolve(ContainerRegistrationKeys.QUERY)
+-
+     if (errors?.[0]) {
+         const error = errors[0].error
+         const statusOKErrors: string[] = [
+diff --git a/packages/core/src/modules/seller/repositories/order-group.ts b/packages/core/src/modules/seller/repositories/order-group.ts
+index dfd06a928..609216080 100644
+--- a/packages/core/src/modules/seller/repositories/order-group.ts
++++ b/packages/core/src/modules/seller/repositories/order-group.ts
+@@ -90,6 +90,18 @@ export class OrderGroupRepository extends DALUtils.mikroOrmBaseRepositoryFactory
+       params.push(...customerIds)
+     }
+ 
++    // The workflow-level idempotency guard looks a group up by its cart. Without
++    // this clause the filter is silently dropped and every caller gets the whole
++    // table back.
++    if (filters.cart_id) {
++      const cartIds = Array.isArray(filters.cart_id)
++        ? filters.cart_id
++        : [filters.cart_id]
++      const placeholders = cartIds.map(() => "?").join(",")
++      whereClauses.push(`og.cart_id IN (${placeholders})`)
++      params.push(...cartIds)
++    }
++
+     if (filters.seller_id) {
+       const sellerIds = Array.isArray(filters.seller_id)
+         ? filters.seller_id
+diff --git a/packages/core/src/workflows/cart/workflows/complete-cart-with-split-orders.ts b/packages/core/src/workflows/cart/workflows/complete-cart-with-split-orders.ts
+index ade60c716..d490f735d 100644
+--- a/packages/core/src/workflows/cart/workflows/complete-cart-with-split-orders.ts
++++ b/packages/core/src/workflows/cart/workflows/complete-cart-with-split-orders.ts
+@@ -81,7 +81,7 @@ export const completeCartWithSplitOrdersWorkflow = createWorkflow(
+         const [orderGroup, cartData] = parallelize(
+             useQueryGraphStep({
+                 entity: "order_group",
+-                fields: ["cart_id"],
++                fields: ["id", "cart_id"],
+                 filters: { cart_id: input.cart_id },
+                 options: {
+                     isList: false,

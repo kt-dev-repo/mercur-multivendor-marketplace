@@ -1,0 +1,75 @@
+# 007 — GET /store/orders/:id requires being the customer.
+#
+# The route returned customer email, name, address and totals to anyone holding
+# the public publishable key. Medusa 2.20.1 deliberately registers no
+# `authenticate` on this matcher (its handler carries a TODO about it), so
+# `req.auth_context` was undefined and a handler-only guard would have rejected
+# legitimate customers too. A Mercur `store/orders/middlewares.ts` therefore
+# registers `authenticate("customer", …)` for `/store/orders/:id` exactly —
+# NOT a wildcard, because `/transfer/accept` and `/transfer/decline` are
+# intentionally token-based and unauthenticated — and the handler filters on
+# `req.auth_context.actor_id`, giving 404 for another customer's order.
+#
+# Query validation stays with Medusa's own entry for this matcher; registering
+# it twice would transform `req.queryConfig` twice.
+
+diff --git a/packages/core/src/api/store/middlewares.ts b/packages/core/src/api/store/middlewares.ts
+index e3ad4dcdd..69522eed8 100644
+--- a/packages/core/src/api/store/middlewares.ts
++++ b/packages/core/src/api/store/middlewares.ts
+@@ -3,6 +3,7 @@ import { MiddlewareRoute } from "@medusajs/medusa"
+ import { storeCartsMiddlewares } from "./carts/middlewares"
+ import { storeOffersMiddlewares } from "./offers/middlewares"
+ import { storeOrderGroupsMiddlewares } from "./order-groups/middlewares"
++import { storeOrdersMiddlewares } from "./orders/middlewares"
+ import { storeProductAttributesMiddlewares } from "./product-attributes/middlewares"
+ import { storeProductCategoriesMiddlewares } from "./product-categories/middlewares"
+ import { storeProductsMiddlewares } from "./products/middlewares"
+@@ -13,6 +14,7 @@ export const storeMiddlewares: MiddlewareRoute[] = [
+   ...storeCartsMiddlewares,
+   ...storeOffersMiddlewares,
+   ...storeOrderGroupsMiddlewares,
++  ...storeOrdersMiddlewares,
+   ...storeProductAttributesMiddlewares,
+   ...storeProductCategoriesMiddlewares,
+   ...storeProductsMiddlewares,
+diff --git a/packages/core/src/api/store/orders/[id]/route.ts b/packages/core/src/api/store/orders/[id]/route.ts
+index a6f68f227..0bf28b8e5 100644
+--- a/packages/core/src/api/store/orders/[id]/route.ts
++++ b/packages/core/src/api/store/orders/[id]/route.ts
+@@ -16,7 +16,10 @@ export const GET = async (
+     input: {
+       fields: withCartPaymentCollectionFields(req.queryConfig.fields),
+       order_id: req.params.id,
+-      filters: { is_draft_order: false },
++      filters: {
++        is_draft_order: false,
++        customer_id: req.auth_context.actor_id,
++      },
+     },
+   })
+ 
+diff --git a/packages/core/src/api/store/orders/middlewares.ts b/packages/core/src/api/store/orders/middlewares.ts
+new file mode 100644
+index 000000000..62024f7d5
+--- /dev/null
++++ b/packages/core/src/api/store/orders/middlewares.ts
+@@ -0,0 +1,18 @@
++import { authenticate } from "@medusajs/framework/http"
++import { MiddlewareRoute } from "@medusajs/medusa"
++
++// Medusa 2.20.1 leaves `GET /store/orders/:id` unauthenticated (its handler even
++// carries a `TODO: Do we want to apply some sort of authentication here?`), so
++// `req.auth_context` is never populated on that matcher and the route hands out
++// customer PII to anyone holding the public publishable key. The matcher is
++// listed exactly — `/store/orders/:id/transfer/{accept,decline}` are token-bearing
++// and intentionally unauthenticated. Query validation stays with Medusa's own
++// entry for this matcher; re-registering it here would transform req.queryConfig
++// twice.
++export const storeOrdersMiddlewares: MiddlewareRoute[] = [
++  {
++    method: ["GET"],
++    matcher: "/store/orders/:id",
++    middlewares: [authenticate("customer", ["session", "bearer"])],
++  },
++]

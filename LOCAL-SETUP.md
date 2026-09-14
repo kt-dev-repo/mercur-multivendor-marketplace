@@ -221,10 +221,13 @@ curl -X POST "http://localhost:9000/store/carts/$CART/line-items" \
      -c "CREATE ROLE postgres LOGIN SUPERUSER CREATEDB PASSWORD 'postgres';"
    ```
 
-Always pass a pattern to the HTTP suite — never run it bare:
+Always pass a pattern to the HTTP suite — never run it bare, and give the path
+**relative to `integration-tests/`**. The repo-relative form matches zero tests
+and still exits 0:
 
 ```bash
-bun run test:integration:http -- integration-tests/http/seller
+bun run test:integration:http -- http/seller                    # right
+bun run test:integration:http -- integration-tests/http/seller  # wrong: 0 tests, exit 0
 ```
 
 Jest prints `haste module naming collision` warnings for `templates/` and

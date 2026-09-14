@@ -53,11 +53,39 @@ medusaIntegrationTestRunner({
                 })
             })
 
-            it("S5-F: enforcement must hold with rbac off (instance default)", async () => {
+            // S5-F: ownership must not share a kill switch with RBAC.
+            //
+            // This suite deliberately runs with `rbac: true`
+            // (`integration-tests/medusa-config.ts`), the opposite of the
+            // deployed instance's default, so the flag cannot simply be
+            // asserted false here. The gate is proven the other way round, and
+            // more strongly: with the policies ACTIVE, the pristine tree still
+            // let seller B write seller A's product (see the red baseline for
+            // S5-A/S5-B), so `policies: [...]` is not a tenant boundary at any
+            // flag setting — and the fix that closes it reads no feature flag
+            // at all.
+            it("S5-F: the ownership check consults no feature flag", async () => {
                 const { FeatureFlag } = await import(
                     "@medusajs/framework/utils"
                 )
-                expect(FeatureFlag.isFeatureEnabled("rbac")).toBe(false)
+                // Documented, not required: whichever way it is set, S5-A..E
+                // below must hold.
+                expect(typeof FeatureFlag.isFeatureEnabled("rbac")).toBe(
+                    "boolean"
+                )
+
+                const { readFileSync } = await import("fs")
+                const { join } = await import("path")
+                const source = readFileSync(
+                    join(
+                        __dirname,
+                        "../../../../packages/core/src/api/vendor/products/middlewares.ts"
+                    ),
+                    "utf-8"
+                )
+                expect(source).not.toMatch(/FeatureFlag|featureFlags/)
+                // The RBAC layer itself is preserved.
+                expect(source).toMatch(/policies:/)
             })
 
             it("S5-E: seller A can read + write its own products (control)", async () => {
@@ -87,6 +115,22 @@ medusaIntegrationTestRunner({
                     .catch((e: any) => e.response)
                 // RED today: 200 leaking A's unpublished product.
                 expect(resp.status).toEqual(404)
+            })
+
+            it("S5-D: seller B MUST still read A's PUBLISHED shared-catalogue product", async () => {
+                const list = await api.get(
+                    `/vendor/products?limit=200&fields=id`,
+                    sellerB.headers
+                )
+                const ids = list.data.products.map((p: any) => p.id)
+                expect(ids).toContain(publishedOfA.id)
+
+                const resp = await api
+                    .get(`/vendor/products/${publishedOfA.id}`, sellerB.headers)
+                    .catch((e: any) => e.response)
+                // The other half of the consistency gate: present in the list,
+                // therefore readable in detail. Offer creation depends on it.
+                expect(resp.status).toEqual(200)
             })
 
             it("S5-A: seller B -> POST /vendor/products/{A's id} is 404", async () => {

@@ -1,0 +1,175 @@
+# 009 — /vendor/products/:id asserts the tenant boundary.
+#
+# GET had only query validation, POST only body+query, DELETE `middlewares: []`.
+# The sole boundary was `policies: [...]`, which is inert whenever the `rbac`
+# feature flag is off — its default. Ownership is a tenant boundary, not a
+# permission, so it must not share that kill switch: POST, DELETE and
+# `/cancel` now run an always-on middleware over the existing
+# `ensureSellerOwnsProduct` helper (NOT_FOUND, never FORBIDDEN).
+#
+# GET is different on purpose: `applySellerProductLinkFilter` deliberately shows
+# the shared master catalogue, so blanket-404 would break offer creation. The
+# visibility predicate is extracted once and used by both list and detail, so
+# the detail route shows exactly what the list shows — another seller's DRAFT
+# (the actual leak) 404s, a PUBLISHED catalogue product still 200s.
+#
+# The `policies: [...]` declarations are left untouched: they are the RBAC layer
+# and become meaningful when the flag is on.
+
+diff --git a/packages/core/src/api/vendor/products/middlewares.ts b/packages/core/src/api/vendor/products/middlewares.ts
+index 8b90d56db..c2fc9902a 100644
+--- a/packages/core/src/api/vendor/products/middlewares.ts
++++ b/packages/core/src/api/vendor/products/middlewares.ts
+@@ -14,6 +14,7 @@ import { ProductStatus } from "@mercurjs/types"
+ 
+ import { applyOfferedProductsFilter } from "../../utils"
+ import {
++  ensureSellerOwnsProduct,
+   getProductIdsRestrictedFromSeller,
+   getSellerOwnedProductIds,
+ } from "./helpers"
+@@ -33,13 +34,19 @@ import {
+   VendorUpdateProduct,
+   VendorUpdateProductVariant,
+ } from "./validators"
+-import { promiseAll } from "@medusajs/framework/utils"
++import {
++  ContainerRegistrationKeys,
++  MedusaError,
++  promiseAll,
++} from "@medusajs/framework/utils"
+ 
+-const applySellerProductLinkFilter = async (
+-  req: AuthenticatedMedusaRequest,
+-  _res: MedusaResponse,
+-  next: MedusaNextFunction
+-) => {
++// The single definition of "which products may this seller see": the ones it is
++// assigned or authored, plus the shared master catalogue (published and not
++// restricted to someone else). List and detail both build on it so they cannot
++// drift apart.
++const sellerVisibleProductPredicate = async (
++  req: AuthenticatedMedusaRequest
++): Promise<object> => {
+   const sellerId = req.seller_context!.seller_id
+ 
+   const [ownProductIds, restrictedFromSellerIds] = await promiseAll([
+@@ -47,20 +54,70 @@ const applySellerProductLinkFilter = async (
+     getProductIdsRestrictedFromSeller(req.scope, sellerId),
+   ])
+ 
++  return {
++    $or: [
++      { id: ownProductIds },
++      {
++        status: ProductStatus.PUBLISHED,
++        id: { $nin: restrictedFromSellerIds },
++      },
++    ],
++  }
++}
++
++const applySellerProductLinkFilter = async (
++  req: AuthenticatedMedusaRequest,
++  _res: MedusaResponse,
++  next: MedusaNextFunction
++) => {
++  const predicate = await sellerVisibleProductPredicate(req)
++
+   req.filterableFields ??= {}
+   const existingAnd = (req.filterableFields.$and as object[] | undefined) ?? []
+-  req.filterableFields.$and = [
+-    ...existingAnd,
+-    {
+-      $or: [
+-        { id: ownProductIds },
+-        {
+-          status: ProductStatus.PUBLISHED,
+-          id: { $nin: restrictedFromSellerIds },
+-        },
+-      ],
++  req.filterableFields.$and = [...existingAnd, predicate]
++
++  return next()
++}
++
++// `GET /vendor/products/:id` must show exactly what `GET /vendor/products`
++// would list for the same seller — otherwise the detail route leaks another
++// seller's drafts.
++const ensureSellerCanViewProduct = async (
++  req: AuthenticatedMedusaRequest,
++  _res: MedusaResponse,
++  next: MedusaNextFunction
++) => {
++  const productId = req.params.id
++  const query = req.scope.resolve(ContainerRegistrationKeys.QUERY)
++
++  const { data: products } = await query.graph({
++    entity: "product",
++    fields: ["id"],
++    filters: {
++      $and: [{ id: productId }, await sellerVisibleProductPredicate(req)],
+     },
+-  ]
++  })
++
++  if (!products.length) {
++    throw new MedusaError(
++      MedusaError.Types.NOT_FOUND,
++      `Product with id ${productId} was not found`
++    )
++  }
++
++  return next()
++}
++
++// Ownership is a tenant boundary, not a permission: it is asserted here rather
++// than through `policies`, which the `rbac` feature flag disables wholesale.
++const ensureSellerOwnsProductParam = async (
++  req: AuthenticatedMedusaRequest,
++  _res: MedusaResponse,
++  next: MedusaNextFunction
++) => {
++  await ensureSellerOwnsProduct(req.scope, req.seller_context!.seller_id, [
++    req.params.id,
++  ])
+ 
+   return next()
+ }
+@@ -110,6 +167,7 @@ export const vendorProductsMiddlewares: MiddlewareRoute[] = [
+         VendorGetProductParams,
+         vendorProductQueryConfig.retrieve
+       ),
++      ensureSellerCanViewProduct,
+     ],
+     policies: [
+       {
+@@ -127,6 +185,7 @@ export const vendorProductsMiddlewares: MiddlewareRoute[] = [
+         VendorGetProductParams,
+         vendorProductQueryConfig.retrieve
+       ),
++      ensureSellerOwnsProductParam,
+     ],
+     policies: [
+       {
+@@ -138,7 +197,7 @@ export const vendorProductsMiddlewares: MiddlewareRoute[] = [
+   {
+     method: ["DELETE"],
+     matcher: "/vendor/products/:id",
+-    middlewares: [],
++    middlewares: [ensureSellerOwnsProductParam],
+     policies: [
+       {
+         resource: PolicyResource.product,
+@@ -150,7 +209,10 @@ export const vendorProductsMiddlewares: MiddlewareRoute[] = [
+   {
+     method: ["POST"],
+     matcher: "/vendor/products/:id/cancel",
+-    middlewares: [validateAndTransformBody(VendorCancelProductChange)],
++    middlewares: [
++      validateAndTransformBody(VendorCancelProductChange),
++      ensureSellerOwnsProductParam,
++    ],
+     policies: [
+       {
+         resource: PolicyResource.product,

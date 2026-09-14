@@ -1,0 +1,25 @@
+# 005 — store add-line-item must not accept a client-supplied price.
+#
+# `StoreAddCartLineItem` exposed `unit_price` and `compare_at_unit_price` on a
+# PUBLIC route (publishable key only), and `route.ts` spreads `...item` into
+# `addToCartWorkflow`, so any caller could name its own price. Both fields are
+# removed; the schema is already `.strict()`, so they now 400 as unrecognized
+# keys and the price resolves server-side from the offer.
+#
+# Behaviour change: a third-party client that sends either field starts getting
+# 400. That is the intent (work order D1) — Medusa's own store API never
+# exposed these fields, and no first-party caller sends them.
+
+diff --git a/packages/core/src/api/store/carts/[id]/line-items/validators.ts b/packages/core/src/api/store/carts/[id]/line-items/validators.ts
+index 28e8fa27f..b7a0493b1 100644
+--- a/packages/core/src/api/store/carts/[id]/line-items/validators.ts
++++ b/packages/core/src/api/store/carts/[id]/line-items/validators.ts
+@@ -4,8 +4,6 @@ export const StoreAddCartLineItem = z
+   .object({
+     offer_id: z.string().min(1, "offer_id is required"),
+     quantity: z.number().int().positive(),
+-    unit_price: z.number().optional(),
+-    compare_at_unit_price: z.number().optional(),
+     metadata: z.record(z.unknown()).optional(),
+     additional_data: z.record(z.unknown()).optional(),
+   })
