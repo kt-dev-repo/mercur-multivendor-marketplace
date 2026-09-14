@@ -796,3 +796,52 @@ one I could not:
   reversible snapshots are in `apps/api/.medusa/`.
 - Not done, and not a gate: the `.claude/skills/mercur/SKILL.md` half of P5.2,
   which the PO offered as end-of-cycle slack.
+
+---
+
+# QC pass 2 — verdict appended by mercur-qc
+
+Full reasoning and evidence: `fix-cycle/05-qc-verdict.md`. Summary only here.
+
+| Item | Verdict |
+|---|---|
+| S1 `005` | **PASS** |
+| S2 `006` | **PASS** — the third file is accepted; gate S2-B was wrong as written and is amended in the verdict |
+| S3 `007` | **PASS-WITH-CONDITIONS** — C5 (guest confirmation page now 401s: PO decision before deploy), C6 (guard `auth_context` explicitly) |
+| S4-CODE `008` | **PASS** |
+| S4-DATA script | **PASS-WITH-CONDITIONS** — C7 (dismiss/create are not atomic; retain snapshots, never restore across databases) |
+| S5 `009` | **PASS-WITH-CONDITIONS** — C1 (verify the patched build live with `rbac=false`), C2–C4 (the four sub-route matchers) |
+
+**Overall: SHIP.** All global gates re-run by QC and passed: invariant empty,
+`--check` pending→applied→pending clean, `bun run lint` clean, `bun run build`
+12/12, `bun run test:unit` 13/13, and the five reproductions **15 failed / 10 passed
+/ 25 total** red (pristine, `packages/core` rebuilt) → **25 passed / 25 total**
+green. Regression: 46 suites, 295 passed / 22 skipped / **0 failed**, including
+`http/order/admin/order-list-filters.spec.ts` 4/4 — the canary that caught the S2
+mis-fix.
+
+**Three corrections to this log.**
+
+1. **The four uncovered `:id` sub-route matchers are not "scoping exists but
+   unverified" — they are open.** QC verified: `variants/route.ts:38`,
+   `variants/[variant_id]/route.ts:43,79` and `attributes/batch/route.ts:15` use
+   `seller_id` **only** as the `created_by` stamp and never assert ownership of
+   `req.params.id`. Seller B can still add/edit/remove variants and rewrite
+   attributes on seller A's product through the same change pipeline. Descoping is
+   accepted (the correct guard there is a genuine PO question, the same one as
+   S5-D), but **P0.3 must not be recorded as closed** and the upstream disclosure
+   must name these four matchers.
+2. **`link.dismiss` is a soft delete.** The repair left 918 tombstones: the raw
+   `inventory_inventory_item_seller_seller` count is **2062**, of which 1144 are
+   live (`deleted_at IS NULL`) and distributed 240/237/226/222/219 as intended. The
+   log reads as though rows were removed.
+3. **S5-C has no red→green proof.** It passes on a pristine tree in the harness, so
+   the spec does not discriminate for that gate; S5-C rests on inspection of the
+   `/cancel` matcher registration plus stage 3's live 200. Not a FAIL — but the
+   claim "3 red → 8 green" in Part D should read "3 red, and S5-C is evidenced
+   live, not in the harness".
+
+Two of QC's own gates were wrong and are corrected in the verdict: **S2-B**
+(its "minimal repair" is actively unsafe) and **S3-B** (option (ii) is
+unimplementable — the dev's option (i) was the only viable mechanism). Both
+corrections are the dev's finding, not QC's.
