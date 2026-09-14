@@ -454,7 +454,7 @@ costs nothing. The upstream doc fix is overlay `003`'s territory.
 Deploy hardening for the Dokploy host (3 vCPU / 19.5 GB) is **ours, not an
 overlay** — `COMPOSE_PARALLEL_LIMIT=1`, `BUILD_JOBS`, `BUILD_HEAP_MB`, per-service
 `mem_limit`. A deploy previously wedged the control plane through CPU starvation.
-See `deploy/dokploy/README.md` §1a.
+See `deploy/dokploy/README.md` §1a (build in CI) and §1b.
 
 ## Remaining backlog, in order
 

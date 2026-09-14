@@ -1,0 +1,107 @@
+# Build the four deployment images on GitHub's runners and push them to GHCR,
+# so the Dokploy host only ever pulls.
+#
+# Why this exists: the server is 3 vCPU / 19.5 GB. Building this monorepo there
+# saturates every core — `turbo.json` sets concurrency 20 and esbuild/SWC size
+# their pools to the core count — and Traefik and the Dokploy panel stop being
+# scheduled. A deploy took the control plane down on 2026-09-14.
+#
+# Each job runs on its own runner, so the four images build in parallel here
+# without competing for the same cores, and the server does no build work at all.
+#
+# Deploy with docker-compose.dokploy.registry.yml, which pulls these tags.
+
+name: Build deployment images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/**"
+      - "packages/**"
+      - "deploy/**"
+      - "integration-tests/**"
+      - "e2e-tests/**"
+      - "package.json"
+      - "bun.lock"
+      - "turbo.json"
+      - ".github/workflows/build-images.yml"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Extra tag to publish (in addition to sha and latest)"
+        required: false
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      # Keep going if one image fails, so a storefront break does not hide a
+      # working api image.
+      fail-fast: false
+      matrix:
+        include:
+          - name: api
+            dockerfile: deploy/dokploy/Dockerfile.api
+          - name: storefront
+            dockerfile: deploy/dokploy/Dockerfile.storefront
+          - name: admin
+            dockerfile: deploy/dokploy/Dockerfile.dashboard
+            app: admin-test
+          - name: vendor
+            dockerfile: deploy/dokploy/Dockerfile.dashboard
+            app: vendor
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}-${{ matrix.name }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=long
+            type=raw,value=${{ inputs.tag }},enable=${{ inputs.tag != '' }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Runners have 4 cores and 16 GB, and nothing else is competing, so the
+          # small-host throttles are off here. BUILD_JOBS empty keeps turbo's own
+          # default. The storefront's public URLs are baked in at BUILD time, so
+          # they must be set as repository variables, not at deploy time.
+          build-args: |
+            APP=${{ matrix.app }}
+            BUILD_HEAP_MB=6144
+            BUILD_JOBS=4
+            MEDUSA_BACKEND_URL=${{ vars.API_PUBLIC_URL }}
+            VITE_MERCUR_BACKEND_URL=${{ vars.API_PUBLIC_URL }}
+            NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY=${{ vars.NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY }}
+            NEXT_PUBLIC_BASE_URL=${{ vars.STOREFRONT_PUBLIC_URL }}
+            NEXT_PUBLIC_DEFAULT_REGION=${{ vars.NEXT_PUBLIC_DEFAULT_REGION }}
+            NEXT_PUBLIC_SITE_NAME=${{ vars.NEXT_PUBLIC_SITE_NAME }}
+            NEXT_PUBLIC_SITE_DESCRIPTION=${{ vars.NEXT_PUBLIC_SITE_DESCRIPTION }}
+            NEXT_PUBLIC_VENDOR_URL=${{ vars.VENDOR_PUBLIC_URL }}
+            NEXT_PUBLIC_STRIPE_KEY=${{ vars.NEXT_PUBLIC_STRIPE_KEY }}
+            REVALIDATE_SECRET=${{ secrets.REVALIDATE_SECRET }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}

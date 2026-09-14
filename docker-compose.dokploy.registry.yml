@@ -1,0 +1,150 @@
+# Mercur marketplace — Dokploy Compose stack, PREBUILT IMAGES.
+#
+# Same stack as docker-compose.dokploy.yml, except the server BUILDS NOTHING.
+# Images come from GHCR, built by .github/workflows/build-images.yml.
+#
+# Use this one. The build-on-server variant needs ~6 CPU-minutes per deploy and
+# took the control plane down on a 3-vCPU host (see deploy/dokploy/README.md §1b).
+# Here a deploy is a pull plus a restart.
+#
+# Setup:
+#   1. Push to main (or run the workflow manually) and wait for the images.
+#   2. If the packages are private: Dokploy → Registry → add ghcr.io with a PAT
+#      that has read:packages.
+#   3. Set IMAGE_REPO to your lowercased GitHub repo, e.g.
+#      IMAGE_REPO=ghcr.io/kt-dev-repo/mercur-multivendor-marketplace
+#   4. IMAGE_TAG=latest, or pin a specific sha-... tag to control rollouts.
+#
+# NOTE: the storefront and dashboards bake their public URLs in AT BUILD TIME,
+# so API_PUBLIC_URL and friends must be set as GitHub repository *variables*,
+# not here. Changing them means re-running the workflow, not redeploying.
+#
+# Postgres and Redis are NOT part of this stack. They run as their own Dokploy
+# services (Dokploy → Create Service → Database), and this stack reaches them
+# over the shared Dokploy network.
+#
+# Setup:
+#   1. Create the Postgres and Redis services in Dokploy first.
+#   2. Copy each one's INTERNAL connection details from its Dokploy page.
+#   3. Create a Compose service pointing at this file.
+#   4. Paste deploy/dokploy/.env.example into Environment and fill it in —
+#      DATABASE_URL and REDIS_URL are full URLs using those internal hostnames.
+#   5. Attach a domain to api, storefront, vendor and admin.
+#
+# Read deploy/dokploy/README.md before the first deploy. Two things bite people:
+# the shared network below must exist, and the storefront/dashboards bake their
+# public URLs in at BUILD time, so the order of operations matters.
+#
+# No host ports are published — Dokploy's Traefik routes to the containers by
+# the domains you attach in the UI.
+#
+# No build knobs here — nothing is compiled on the server. The mem_limit values
+# still apply: they bound the RUNNING containers so a leak kills one container
+# rather than the host.
+
+networks:
+  # Dokploy's shared network. Every service it manages joins this, and it is the
+  # ONLY way this stack can resolve the Postgres and Redis services by hostname:
+  # compose `depends_on` and service-name DNS do not cross project boundaries.
+  # Confirm the name on your server with `docker network ls`; override with
+  # DOKPLOY_NETWORK if yours differs.
+  dokploy:
+    external: true
+    name: ${DOKPLOY_NETWORK:-dokploy-network}
+
+services:
+  api:
+    image: ${IMAGE_REPO}-api:${IMAGE_TAG:-latest}
+    pull_policy: always
+    restart: unless-stopped
+    # Medusa's resident set is modest, but migrations and workflow engine spikes
+    # are not. Bound it so a runaway API cannot take the host with it.
+    mem_limit: ${API_MEM_LIMIT:-4g}
+    networks: [dokploy]
+    environment:
+      # Full URLs pointing at the separate Dokploy services. The host is each
+      # service's INTERNAL hostname from its Dokploy page — never localhost,
+      # which inside this container means the API container itself.
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      COOKIE_SECRET: ${COOKIE_SECRET}
+      STORE_CORS: ${STORE_CORS}
+      ADMIN_CORS: ${ADMIN_CORS}
+      VENDOR_CORS: ${VENDOR_CORS}
+      AUTH_CORS: ${AUTH_CORS}
+      MERCUR_VENDOR_URL: ${VENDOR_PUBLIC_URL}
+      STOREFRONT_REVALIDATE_URL: ${STOREFRONT_PUBLIC_URL}
+      STOREFRONT_REVALIDATE_SECRET: ${REVALIDATE_SECRET}
+      # The local file provider bakes this origin into every uploaded file URL.
+      # It must be the public API origin or images resolve to a broken host.
+      # Ignored once S3_BUCKET is set.
+      FILE_BACKEND_URL: ${API_PUBLIC_URL}/static
+      # File storage. Setting S3_BUCKET switches the API from the local provider
+      # to S3; leave it empty to keep local. See deploy/dokploy/README.md.
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_REGION: ${S3_REGION:-}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_FILE_URL: ${S3_FILE_URL:-}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+      S3_AUTHENTICATION_METHOD: ${S3_AUTHENTICATION_METHOD:-}
+      S3_PREFIX: ${S3_PREFIX:-}
+      S3_CACHE_CONTROL: ${S3_CACHE_CONTROL:-}
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-}
+      S3_ACL: ${S3_ACL:-}
+      PORT: 9000
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      RUN_SEED: ${RUN_SEED:-false}
+      # How long the entrypoint waits for Postgres and Redis before giving up.
+      # There is no depends_on across Dokploy services, so this is the ordering
+      # guarantee.
+      WAIT_TIMEOUT: ${WAIT_TIMEOUT:-120}
+      # Medusa aborts migrations if a probe query does not return within this
+      # many ms (default 10000). It can fire even when the database is
+      # reachable; see the note in deploy/dokploy/README.md.
+      MEDUSA_DB_MIGRATION_CONNECTION_TIMEOUT: ${MEDUSA_DB_MIGRATION_CONNECTION_TIMEOUT:-30000}
+    volumes:
+      # Only used by the LOCAL file provider. Once S3_BUCKET is set this is dead
+      # weight and can be removed. Without it, local uploads vanish on redeploy.
+      - uploads:/app/static
+    expose:
+      - "9000"
+
+  storefront:
+    image: ${IMAGE_REPO}-storefront:${IMAGE_TAG:-latest}
+    pull_policy: always
+    restart: unless-stopped
+    mem_limit: ${STOREFRONT_MEM_LIMIT:-2g}
+    networks: [dokploy]
+    environment:
+      # Server-side only, so this one CAN change at runtime. It is the public
+      # API origin because the browser follows the same URLs.
+      MEDUSA_BACKEND_URL: ${API_PUBLIC_URL}
+      REVALIDATE_SECRET: ${REVALIDATE_SECRET}
+    expose:
+      - "3000"
+
+  vendor:
+    image: ${IMAGE_REPO}-vendor:${IMAGE_TAG:-latest}
+    pull_policy: always
+    restart: unless-stopped
+    # nginx serving static files — tiny at runtime. The build is the expensive
+    # part, and that is bounded by BUILD_HEAP_MB above.
+    mem_limit: ${DASHBOARD_MEM_LIMIT:-256m}
+    networks: [dokploy]
+    expose:
+      - "80"
+
+  admin:
+    image: ${IMAGE_REPO}-admin:${IMAGE_TAG:-latest}
+    pull_policy: always
+    restart: unless-stopped
+    mem_limit: ${DASHBOARD_MEM_LIMIT:-256m}
+    networks: [dokploy]
+    expose:
+      - "80"
+
+volumes:
+  uploads:

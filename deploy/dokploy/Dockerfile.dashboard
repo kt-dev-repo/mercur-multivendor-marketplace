@@ -82,10 +82,23 @@ WORKDIR /repo
 COPY deploy/overlays ./deploy/overlays
 RUN bash deploy/overlays/apply.sh
 
+# Build the shared dependencies, then ONLY the dashboard this image ships.
+#
+# This used to build @mercurjs/admin AND @mercurjs/vendor in both images, so each
+# one paid for a package it never uses — and the vendor package's .d.ts step
+# alone took 309s on the 3-vCPU host.
 RUN bun run build --concurrency=${BUILD_JOBS} \
                   --filter=@mercurjs/types --filter=@mercurjs/client \
-                  --filter=@mercurjs/dashboard-sdk --filter=@mercurjs/dashboard-shared \
-                  --filter=@mercurjs/admin --filter=@mercurjs/vendor
+                  --filter=@mercurjs/dashboard-sdk --filter=@mercurjs/dashboard-shared
+
+# `--no-dts` (cac boolean negation, honoured by tsup) skips .d.ts generation,
+# which dominates this build and is worthless in a runtime image: neither app
+# runs tsc, `vite build` only bundles JS, and no consumer imports types from
+# inside the container. Locally this takes the vendor package from 19.3s to 1.0s.
+RUN PKG=$([ "${APP}" = "admin-test" ] && echo admin || echo vendor) \
+ && cd packages/${PKG} \
+ && bun x tsup --no-dts \
+ && bun run generate:targets
 WORKDIR /repo/apps/${APP}
 RUN node ./node_modules/.bin/vite build && test -d dist
 

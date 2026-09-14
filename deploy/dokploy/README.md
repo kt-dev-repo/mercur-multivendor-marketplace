@@ -87,10 +87,37 @@ and the patch must be regenerated rather than forced. See
 
   **Set `COMPOSE_PARALLEL_LIMIT=1` before your first deploy.** Compose builds all
   four services concurrently by default; two monorepo installs, a `next build`
-  and two vite builds at once will exhaust any modest VPS. See §1a.
+  and two vite builds at once will exhaust any modest VPS. See §1b — or better, §1a.
 - Roughly **8 GB free disk** for the image layers and the bun install cache.
 
-## 1a. Do not let the build kill the server
+## 1a. Build in CI, not on the server (recommended)
+
+**If the deploy keeps failing, this is the fix.** The server is 3 vCPU / 19.5 GB;
+building this monorepo there needs roughly six CPU-minutes of compilation and
+starves Traefik and the Dokploy panel while it runs. Pulling a prebuilt image
+turns a deploy into a download plus a restart.
+
+1. `.github/workflows/build-images.yml` builds all four images on GitHub runners
+   (one job each, so they do not compete) and pushes them to GHCR.
+2. Set the **build-time** values as GitHub repository *variables* — they are
+   baked into the bundles and cannot be changed at deploy time:
+   `API_PUBLIC_URL`, `STOREFRONT_PUBLIC_URL`, `VENDOR_PUBLIC_URL`,
+   `NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY`, `NEXT_PUBLIC_DEFAULT_REGION`,
+   `NEXT_PUBLIC_SITE_NAME`, `NEXT_PUBLIC_SITE_DESCRIPTION`,
+   `NEXT_PUBLIC_STRIPE_KEY`; plus the secret `REVALIDATE_SECRET`.
+3. In Dokploy point the Compose service at **`docker-compose.dokploy.registry.yml`**
+   and set `IMAGE_REPO=ghcr.io/<owner>/<repo>` (lowercase) and `IMAGE_TAG=latest`,
+   or pin a `sha-…` tag to control rollouts.
+4. If the GHCR packages are private, add a ghcr.io registry in Dokploy with a PAT
+   carrying `read:packages`.
+
+The publishable-key chicken-and-egg from §6 still applies: the key does not exist
+until the database is seeded, so the first pass is api-up → take the key → set the
+variable → re-run the workflow → redeploy the storefront.
+
+## 1b. If you must build on the server
+
+### Why it is dangerous here
 
 This stack has taken a Dokploy host down, so treat this as required reading.
 
@@ -154,7 +181,7 @@ the provider's web console or serial console, or hard-reboot from the panel.
    push to a registry, and have Dokploy deploy the tag. Replace each `build:`
    block with `image: your-registry/mercur-<service>:<tag>`.
 
-## 1b. Architecture: what talks to what
+## 1c. Architecture: what talks to what
 
 Postgres and Redis are **separate Dokploy services**. This stack contains only
 the four application services and reaches the databases over Dokploy's shared
@@ -218,7 +245,7 @@ change nothing else — the browser never uses this value.
 | `NEXT_PUBLIC_*`, `VITE_MERCUR_BACKEND_URL`, `API_PUBLIC_URL` (as a build arg) | **build** — changing it needs a Redeploy/rebuild |
 | `DATABASE_URL`, `REDIS_URL`, `*_CORS`, `S3_*`, `JWT_SECRET`, `MEDUSA_BACKEND_URL` | **runtime** — a restart is enough |
 
-## 1c. Create Postgres and Redis first
+## 1d. Create Postgres and Redis first
 
 1. Dokploy → **Create Service → Database → PostgreSQL** (16+). Note the
    generated user, password, database name and **internal hostname**.
@@ -419,7 +446,7 @@ drops in-flight workflow state. Appendonly persistence is on.
 | Images still resolve to `/static` after setting S3 | `S3_BUCKET` empty or not reaching the container; check the api service env. |
 | Seed data duplicated | `RUN_SEED` left `true`. Set false and redeploy. |
 | `ERR_WORKER_OUT_OF_MEMORY` during build | `BUILD_HEAP_MB` too low for the dashboard build. Raise it — but never above host RAM. |
-| **Dokploy panel itself goes down during a deploy** | Host OOM: the kernel killed Traefik or the panel instead of the build. Tell-tale signs are a host that still answers ping and still completes TCP handshakes on 80/443/3000 while returning zero bytes. Recover from the provider console (SSH is usually unreachable too), then set `COMPOSE_PARALLEL_LIMIT=1`, lower `BUILD_HEAP_MB`, and add swap. See §1a. |
+| **Dokploy panel itself goes down during a deploy** | Host OOM: the kernel killed Traefik or the panel instead of the build. Tell-tale signs are a host that still answers ping and still completes TCP handshakes on 80/443/3000 while returning zero bytes. Recover from the provider console (SSH is usually unreachable too), then set `COMPOSE_PARALLEL_LIMIT=1`, lower `BUILD_HEAP_MB`, and add swap — or move builds to CI, §1a. |
 | `Parsing error: The keyword 'export' is reserved` | Root `eslint.config.mts` missing from the build context. |
 | ``` `column` must be greater than or equal to 0 ``` | Something is running medusa under bun instead of Node. |
 | `File /app/src/scripts/seed.ts doesn't exist` | Use the compiled `seed.js` path; the entrypoint handles this. |
