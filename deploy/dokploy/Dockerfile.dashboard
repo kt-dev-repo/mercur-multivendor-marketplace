@@ -57,7 +57,7 @@ ENV VITE_MERCUR_BACKEND_URL=$VITE_MERCUR_BACKEND_URL
 #   4 GB       2048   (tight; prefer building in CI)
 #   8 GB       4096
 #   16 GB+     6144
-ARG BUILD_HEAP_MB=4096
+ARG BUILD_HEAP_MB=6144
 ENV NODE_OPTIONS=--max-old-space-size=${BUILD_HEAP_MB}
 WORKDIR /repo
 

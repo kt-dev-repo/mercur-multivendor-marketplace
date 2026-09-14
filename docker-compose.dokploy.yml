@@ -60,7 +60,7 @@ services:
     restart: unless-stopped
     # Medusa's resident set is modest, but migrations and workflow engine spikes
     # are not. Bound it so a runaway API cannot take the host with it.
-    mem_limit: ${API_MEM_LIMIT:-2g}
+    mem_limit: ${API_MEM_LIMIT:-4g}
     networks: [dokploy]
     environment:
       # Full URLs pointing at the separate Dokploy services. The host is each
@@ -130,7 +130,7 @@ services:
         NEXT_PUBLIC_VENDOR_URL: ${VENDOR_PUBLIC_URL}
         REVALIDATE_SECRET: ${REVALIDATE_SECRET}
     restart: unless-stopped
-    mem_limit: ${STOREFRONT_MEM_LIMIT:-1g}
+    mem_limit: ${STOREFRONT_MEM_LIMIT:-2g}
     networks: [dokploy]
     environment:
       # Server-side only, so this one CAN change at runtime. It is the public
@@ -147,7 +147,7 @@ services:
       args:
         APP: vendor
         VITE_MERCUR_BACKEND_URL: ${API_PUBLIC_URL}
-        BUILD_HEAP_MB: ${BUILD_HEAP_MB:-4096}
+        BUILD_HEAP_MB: ${BUILD_HEAP_MB:-6144}
     restart: unless-stopped
     # nginx serving static files — tiny at runtime. The build is the expensive
     # part, and that is bounded by BUILD_HEAP_MB above.
@@ -163,7 +163,7 @@ services:
       args:
         APP: admin-test
         VITE_MERCUR_BACKEND_URL: ${API_PUBLIC_URL}
-        BUILD_HEAP_MB: ${BUILD_HEAP_MB:-4096}
+        BUILD_HEAP_MB: ${BUILD_HEAP_MB:-6144}
     restart: unless-stopped
     mem_limit: ${DASHBOARD_MEM_LIMIT:-256m}
     networks: [dokploy]

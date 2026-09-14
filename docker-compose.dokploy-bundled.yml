@@ -78,7 +78,7 @@ services:
       context: .
       dockerfile: deploy/dokploy/Dockerfile.api
     restart: unless-stopped
-    mem_limit: ${API_MEM_LIMIT:-2g}
+    mem_limit: ${API_MEM_LIMIT:-4g}
     depends_on:
       postgres: { condition: service_healthy }
       redis:    { condition: service_healthy }
@@ -142,7 +142,7 @@ services:
         NEXT_PUBLIC_VENDOR_URL: ${VENDOR_PUBLIC_URL}
         REVALIDATE_SECRET: ${REVALIDATE_SECRET}
     restart: unless-stopped
-    mem_limit: ${STOREFRONT_MEM_LIMIT:-1g}
+    mem_limit: ${STOREFRONT_MEM_LIMIT:-2g}
     depends_on:
       api: { condition: service_started }
     environment:
@@ -158,7 +158,7 @@ services:
       args:
         APP: vendor
         VITE_MERCUR_BACKEND_URL: ${API_PUBLIC_URL}
-        BUILD_HEAP_MB: ${BUILD_HEAP_MB:-4096}
+        BUILD_HEAP_MB: ${BUILD_HEAP_MB:-6144}
     restart: unless-stopped
     mem_limit: ${DASHBOARD_MEM_LIMIT:-256m}
     expose:
@@ -171,7 +171,7 @@ services:
       args:
         APP: admin-test
         VITE_MERCUR_BACKEND_URL: ${API_PUBLIC_URL}
-        BUILD_HEAP_MB: ${BUILD_HEAP_MB:-4096}
+        BUILD_HEAP_MB: ${BUILD_HEAP_MB:-6144}
     restart: unless-stopped
     mem_limit: ${DASHBOARD_MEM_LIMIT:-256m}
     expose:

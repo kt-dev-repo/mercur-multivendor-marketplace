@@ -95,11 +95,20 @@ and the patch must be regenerated rather than forced. See
 This stack has taken a Dokploy host down, so treat this as required reading.
 
 **What happens.** All four services carry a `build:` block and Compose builds
-them concurrently. Peak memory is therefore the *sum* of two monorepo installs,
-a `next build` and two vite builds — not the 6 GB figure quoted above for a
-single image. When the host runs out, the Linux OOM-killer chooses its victim by
-score **across the whole machine**, and Traefik and the Dokploy panel are
-candidates. You lose the control plane, not just the deploy.
+them concurrently: two monorepo installs, a `next build` and two vite builds,
+all at once.
+
+The usual failure is **CPU and disk I/O starvation, not memory**. Four parallel
+builds peg every vCPU, and Traefik and the Dokploy panel then cannot get
+scheduled long enough to answer a request. Observed on a 19.5 GB / 144 GB host:
+CPU pinned at 100%, memory only 13 GB of 19.5 used, disk at 27% — and the panel
+was still unreachable.
+
+Memory is the second failure mode, and it dominates on smaller hosts. Peak
+demand is the *sum* of all four builds, not the single-image figure above. When
+the host runs out, the Linux OOM-killer chooses its victim by score **across the
+whole machine**, and Traefik and the Dokploy panel are candidates. Either way
+you lose the control plane, not just the deploy.
 
 **Why an over-large heap ceiling makes it worse.** `--max-old-space-size` above
 available RAM is worse than no ceiling at all: Node will not fail at its own
@@ -121,11 +130,15 @@ the provider's web console or serial console, or hard-reboot from the panel.
 **Prevention, in order of effectiveness:**
 
 1. **Build one image at a time** — set `COMPOSE_PARALLEL_LIMIT=1` in the Dokploy
-   service Environment. Single biggest win, costs only build time.
+   service Environment. Single biggest win by a wide margin: it fixes the CPU
+   and I/O contention as well as the memory spike, and costs only build time.
 2. **Size `BUILD_HEAP_MB` to the host** — 2048 at 4 GB, 4096 at 8 GB, 6144 at
-   16 GB+.
-3. **Keep the `mem_limit` values** in the compose file. They bound the running
-   containers so a leak kills one container rather than the host.
+   16 GB+ (the default).
+3. **Keep the `mem_limit` values** in the compose file, but do not set them too
+   low. They bound the running containers so a leak kills one container rather
+   than the host — yet an `api` capped under ~3 GB can be OOM-killed by Docker
+   during migrations or seeding, which presents as an unexplained crash-loop.
+   The defaults suit a 16-20 GB host; halve them for 8 GB.
 4. **Add swap** as a safety net — it turns a hard OOM into slowness:
    ```bash
    sudo fallocate -l 4G /swapfile && sudo chmod 600 /swapfile
