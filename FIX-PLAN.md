@@ -3,6 +3,14 @@
 Remediation plan from the static audit of **2026-09-10** against upstream base
 `a925daf62` (v2.3.4-canary.6).
 
+> **Cycle 1 closed 2026-09-14 — see `fix-cycle/CYCLE-1-CLOSURE.md`.**
+> P0.1, P0.2, P0.4 and P0.5 are **fixed** (overlays `005`–`008`) and verified
+> against the live stack. **P0.3 is only partially fixed** (overlay `009`) and
+> remains exploitable through four sub-route matchers — it is the highest-priority
+> carry-over. Their sections below are compacted to the outcome; the full original
+> analysis is in git history at `21a6633d1`. Everything else here is untouched and
+> still open.
+>
 > **Status of evidence**
 > - Findings below marked **[VERIFIED]** were re-checked by hand against the
 >   source, not accepted from a report.
@@ -76,112 +84,43 @@ with tests that would have caught these.
 These displace everything below. Both P0.1 and P0.2 are reachable by anyone with
 the publishable key, which is public by design.
 
-### P0.1 — Customers set their own prices **[VERIFIED BY HAND — €220 sold for €5]**
+### P0.1 — Customers set their own prices — **FIXED, overlay `005`**
 
-`packages/core/src/api/store/carts/[id]/line-items/validators.ts` exposes
-`unit_price` and `compare_at_unit_price` on the **public** store route:
+`unit_price`/`compare_at_unit_price` removed from the public store line-item
+validator; the schema is `.strict()` so both now 400. Live: 220 EUR stays 220 EUR.
 
-```ts
-export const StoreAddCartLineItem = z.object({
-  offer_id: z.string().min(1),
-  quantity: z.number().int().positive(),
-  unit_price: z.number().optional(),            // customer-controlled price
-  compare_at_unit_price: z.number().optional(),
-  ...
-}).strict()
-```
+### P0.2 — Cart completion is not idempotent — **FIXED, overlay `006`**
 
-`route.ts:15` destructures only `additional_data, metadata, offer_id`, so both
-fields land in `...item` and are spread into `items:` for `addToCartWorkflow`.
-Medusa's own store API deliberately never exposes `unit_price` — it is
-admin/draft-order only.
+The guard queried `order_group` without selecting `id`, so it was always
+undefined. Fixed in the workflow **and** in `OrderGroupRepository`, which
+silently dropped the `cart_id` filter. Live: repeat complete 409, 5 concurrent
+completes return one shared group.
 
-My own reproduction on the live stack, same offer, same quantity:
+### P0.3 — Vendor A modifies vendor B's product — **PARTIALLY FIXED, overlay `009`. STILL OPEN.**
 
-```
-no unit_price      -> qty=5 unit_price=44 subtotal=220 total=220
-unit_price: 1      -> qty=5 unit_price=1  subtotal=5   TOTAL=5 eur
-```
+GET/POST/DELETE/cancel on `/vendor/products/:id` now run an always-on ownership
+middleware (404, never 403) that does **not** share RBAC's kill switch.
 
-The tester drove it through to a completed order: `order_group` total **15**,
-payment collection for **15**, order row `qty 5 | unit_price 1`. 220 EUR of goods
-sold for 5.
+**Not covered — still exploitable:** `variants/route.ts:38`,
+`variants/[variant_id]/route.ts:43,79`, `attributes/batch/route.ts:15` use
+`seller_id` only as `created_by`. Reproduced live: seller B queued a
+`VARIANT_ADD` change on seller A's product. Lands `pending` by default, but
+`MEDUSA_FF_PRODUCT_REQUEST=false` makes `auto-confirm-product-change.ts:30`
+confirm it immediately. **Carry into the next cycle.**
 
-*Fix:* remove both fields from the store validator. `.strict()` then rejects them
-outright. Price must resolve server-side from the offer. Two lines.
-*Also:* `unit_price: -100` returns **HTTP 500** — fix with the same change.
+### P0.4 — All inventory items belong to one seller — **FIXED, overlay `008` + data repair**
 
-### P0.2 — Cart completion is not idempotent: one cart, unlimited orders **[VERIFIED BY HAND]**
+`create-offers.ts` linked every item in a batch to `offers[0].seller_id ?? ""`;
+now each item links to its own declaring seller and a falsy `seller_id` throws.
+Live data repaired 1144 rows to 240/237/226/222/219, zero empty. Note
+`link.dismiss` soft-deletes, so the raw table keeps 918 tombstones.
 
-`POST /store/carts/:id/complete` creates a **new** `order_group` on every call.
-Deterministic with two **sequential** requests — no race needed.
+### P0.5 — Unauthenticated `GET /store/orders/:id` leaks PII — **FIXED, overlay `007`**
 
-My reproduction:
-```
-complete #1 -> order_group og_01M249S0H2QGFJ6NDMMV8F46Y6
-complete #2 -> order_group og_01M249S0P540NHKQ1JJH3FCPQW   (same cart)
-DB: order_groups=2  orders=2  cart.completed_at=t
-```
-Tester's 5-parallel run: 5 order groups, 10 orders, 8 commission lines, against
-**one** payment of 192 EUR, with `reserved_quantity` triple-counted.
-
-The guard exists and never fires —
-`packages/core/src/workflows/cart/workflows/complete-cart-with-split-orders.ts`
-declares `idempotent: false`, takes `acquireLockStep({ key: input.cart_id })`, then
-gates creation on `when(..., ({ orderGroupId }) => !orderGroupId)`. `completed_at`
-**is** written but never checked, and the order-group-by-cart_id lookup resolves to
-nothing on re-entry, so the create branch always runs.
-
-*Impact:* a customer refreshing the confirmation page duplicates their order.
-Sellers get duplicate fulfillment obligations and duplicate commission lines
-against a single payment.
-
-*Fix:* reject in the route when `cart.completed_at` is set (409), **and** repair the
-re-entry guard in the workflow so the lock actually protects. Do both — the route
-check alone still loses a true concurrent race.
-
-### P0.3 — Vendor A modifies vendor B's product, and it applies **[tester-verified end to end]**
-
-`POST /vendor/products/:id` has no ownership check.
-`api/vendor/products/middlewares.ts` applies `applySellerProductLinkFilter` only to
-the **list** matcher; the `:id` matchers get validators and RBAC policies only — and
-**`rbac` is `false` on this instance** (`GET /vendor/feature-flags`), so every
-`policies: [...]` declaration is inert.
-
-Seller B submitted a change against seller A's draft product; `product_change.created_by`
-recorded seller B; the admin queue showed it as legitimate; on confirm the title
-became `PWNED-BY-SELLER-B`. Seller A cannot cancel it.
-
-*Fix:* assert product ownership on the `:id` write routes, independent of RBAC.
-**Never rely on a feature-flagged policy as the only tenant boundary.**
-
-### P0.4 — All inventory items belong to one seller **[VERIFIED BY HAND]**
-
-```
-inventory_inventory_item_seller_seller:  Peak & Pace = 1144   (only seller present)
-offers per seller:  Kickz 240, Urban Step 237, Peak & Pace 226, Trailhead 222, Sole Society 219
-```
-
-Two defects at once: **4 of 5 sellers cannot manage their own inventory at all**,
-and the fifth can read and zero every competitor's stock. The tester set a
-competitor's `stocked_quantity` from 1,000,000 to 0 through a legitimately-scoped
-route, then restored it.
-
-The API's ownership check is **correct here** — the link data is wrong. Likely the
-seeder, but **triage the production provisioning path before assuming that**: if
-offer creation links inventory to the wrong seller, live data is affected too.
-
-### P0.5 — Unauthenticated `GET /store/orders/:id` leaks PII **[VERIFIED BY HAND]**
-
-```
-curl -H "x-publishable-api-key: $PK" /store/orders/order_01M22D42YFPQ8TVESVJPXQZCSM
--> 200  email, full name, street, city, postcode, total
-```
-Controls behave correctly: `/store/orders` list → **401**, `/store/order-groups/:id`
-→ **401**. The guard was simply missed on this one route. Ids are ULIDs so not
-trivially enumerable, but this is broken access control on customer PII.
-
-*Fix:* filter on `req.auth_context.actor_id` as the sibling routes do.
+Medusa ships `/store/orders/:id` with no `authenticate`, so handler-level
+checks 500 rather than 401. Fixed by registering `authenticate("customer")` on
+that exact matcher and scoping the query to `req.auth_context.actor_id`. The
+token-bearing `transfer/accept|decline` routes stay intentionally open. Live: 401.
 
 ### P0.6 — Unhandled 500s on trivial input, two reachable unauthenticated
 
