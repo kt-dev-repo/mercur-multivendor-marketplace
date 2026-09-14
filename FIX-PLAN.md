@@ -3,13 +3,19 @@
 Remediation plan from the static audit of **2026-09-10** against upstream base
 `a925daf62` (v2.3.4-canary.6).
 
-> **Cycle 1 closed 2026-09-14 — see `fix-cycle/CYCLE-1-CLOSURE.md`.**
-> P0.1, P0.2, P0.4 and P0.5 are **fixed** (overlays `005`–`008`) and verified
-> against the live stack. **P0.3 is only partially fixed** (overlay `009`) and
-> remains exploitable through four sub-route matchers — it is the highest-priority
-> carry-over. Their sections below are compacted to the outcome; the full original
-> analysis is in git history at `21a6633d1`. Everything else here is untouched and
-> still open.
+> **Status 2026-09-14 — 13 overlays, all `pending`, applying together cleanly.**
+>
+> | | |
+> |---|---|
+> | `001`-`004` | local fixes (storefront 404s, `test:unit`, doc ports, S3) |
+> | `005`-`009` | security cycle 1 — see `fix-cycle/CYCLE-1-CLOSURE.md` |
+> | `010`-`013` | performance/correctness — see §P6 |
+>
+> P0.1, P0.2, P0.4, P0.5 **fixed** and verified live. **P0.3 only partially
+> fixed** — still exploitable through four sub-route matchers, and the
+> highest-priority carry-over. Those sections are compacted to their outcome;
+> full analysis is in git history at `21a6633d1`. Everything else below is
+> untouched and still open.
 >
 > **Status of evidence**
 > - Findings below marked **[VERIFIED]** were re-checked by hand against the
@@ -431,24 +437,42 @@ costs nothing. The upstream doc fix is overlay `003`'s territory.
 
 ---
 
-## Suggested execution order (revised after the runtime pass)
+## P6 — Performance and data correctness (done 2026-09-14)
 
-1. **P0.1** — two-line validator change, stops unauthenticated price tampering.
-2. **P0.2** — route `completed_at` check **and** the workflow re-entry guard.
-3. **P0.5** — add the `actor_id` filter; one route, copies its siblings.
-4. **P0.3** — ownership assertion on `vendor/products/:id` writes, independent of
-   the `rbac` flag.
-5. **P0.4** — triage the provisioning path first; fix the data, then add a
-   constraint/test so the link cannot skew again.
-6. **P0.6** — input coercion on the public query params.
-7. **P0b.1 / P0b.2** — ours, documentation, free.
-8. **P5.2 skill correction** — free.
-9. **P2.1** (`@InjectTransactionManager`), **P2.2** (payout compensation) — small,
-   high financial exposure.
-10. **P1.\*** — only behind a reproduction; otherwise they are speculative.
-11. **P3.\***, **P4.\*** — hardening.
-12. **P2.3 / P2.4** — need the PO's product decision.
-13. **P5.1** — track, do not overlay.
+| Item | Overlay | Result |
+|---|---|---|
+| Admin shipped all 29 locales to every user | `010` | 7.84 MB chunk → 540 KB |
+| Vendor shipped all 31 locales | `011` | 9.1 MB chunk → 544 KB |
+| 327 admin translations silently dropped by duplicate JSON keys | `012` | 327 restored, 0 lost, 0 visible values changed |
+| Turbo could not cache `next build` (`.next/**` missing from outputs) | `013` | cold 25s → warm 591ms |
+
+Deploy hardening for the Dokploy host (3 vCPU / 19.5 GB) is **ours, not an
+overlay** — `COMPOSE_PARALLEL_LIMIT=1`, `BUILD_JOBS`, `BUILD_HEAP_MB`, per-service
+`mem_limit`. A deploy previously wedged the control plane through CPU starvation.
+See `deploy/dokploy/README.md` §1a.
+
+## Remaining backlog, in order
+
+1. **P0.3 — finish it.** Four matchers still assert no ownership:
+   `variants/route.ts:38`, `variants/[variant_id]/route.ts:43,79`,
+   `attributes/batch/route.ts:15`. Reproduced live. Bounded today because
+   `product_request` defaults `true`, but `MEDUSA_FF_PRODUCT_REQUEST=false` makes
+   `auto-confirm-product-change.ts:30` land the write immediately.
+2. **`OrderGroupRepository.findAndCount` drops unknown filters** — returns the
+   whole table for any key outside its allow-list. `006` fixed only `cart_id`.
+   Same class as P0.5.
+3. **Verify `010`-`012` in a browser.** No non-English locale has been loaded
+   against them. The build proves chunks split; it does not prove a German user
+   sees German.
+4. **`$schema.json` drift** — `en.json` has 16 `sellers.*` keys the schema does
+   not declare, so `validate-translations.spec.ts` is red and masks regressions.
+5. **`apps/api` has no typecheck task** — 7 TypeScript errors in seed/probe
+   scripts survive because `medusa build` runs with `|| true`.
+6. **P0.6** input coercion, then **P2.1** / **P2.2** (financial exposure).
+7. **P1.\*** only behind a reproduction; **P3.\*** / **P4.\*** hardening.
+8. **P2.3 / P2.4** need a product decision. **P5.1** track, do not overlay.
+9. **Move builds to CI.** 3 vCPUs is under-provisioned for this monorepo; build
+   images and deploy by tag rather than building on the server.
 
 ### Upstream disclosure
 
