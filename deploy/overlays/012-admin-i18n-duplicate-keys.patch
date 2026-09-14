@@ -1,0 +1,2336 @@
+# 012 — 327 translated strings were silently discarded by duplicate JSON keys.
+#
+# 28 of the admin locale files (plus $schema.json) declared `commissions`,
+# `scheduledClosure` or `views` TWICE at the same level. JSON has no merge
+# semantics — the last occurrence wins outright — so the earlier block was
+# dropped at parse time and those keys fell back to English for every non-English
+# user. In de.json, for example, `commissions` at line 13 held the whole
+# `rulesTable` sub-tree and was overwritten by the block at line 4012.
+#
+# The duplicate blocks are DISJOINT: there is not one leaf where the two
+# definitions disagree. So this is a pure merge, verified as such:
+#
+#   strings restored ........ 327
+#   strings lost ............ 0
+#   visible values changed .. 0
+#
+# Each merged key is re-inserted at the LAST occurrence's position — the one
+# that wins today — so the patch moves the small orphaned block down rather than
+# reordering the file, and stays reviewable.
+#
+# Files are rewritten with `json.dumps(indent=2, ensure_ascii=False)`, which
+# round-trips a duplicate-free file byte-for-byte, so the only changes here are
+# the merges themselves.
+#
+# This does NOT fix `validate-translations.spec.ts`, which fails on a pristine
+# tree for an unrelated reason: en.json carries 16 `sellers.*` keys that
+# $schema.json does not declare. Separate concern, separate patch.
+
+diff --git a/packages/admin/src/i18n/translations/$schema.json b/packages/admin/src/i18n/translations/$schema.json
+index dd4cadc5a..099327542 100644
+--- a/packages/admin/src/i18n/translations/$schema.json
++++ b/packages/admin/src/i18n/translations/$schema.json
+@@ -4595,9 +4595,6 @@
+             "storeLocationWarningLabel": {
+               "type": "string"
+             },
+-            "storeLocationWarning": {
+-              "type": "string"
+-            },
+             "create": {
+               "type": "string"
+             },
+diff --git a/packages/admin/src/i18n/translations/ar.json b/packages/admin/src/i18n/translations/ar.json
+index e7df79588..aa59d1cad 100644
+--- a/packages/admin/src/i18n/translations/ar.json
++++ b/packages/admin/src/i18n/translations/ar.json
+@@ -1,22 +1,4 @@
+ {
+-  "views": {
+-    "toasts": {
+-      "created": "تم إنشاء العرض",
+-      "createFailed": "فشل إنشاء العرض",
+-      "updateActiveFailed": "فشل تحديث العرض النشط",
+-      "updated": "تم تحديث العرض",
+-      "updateFailed": "فشل تحديث العرض",
+-      "deleted": "تم حذف العرض بنجاح",
+-      "deleteFailed": "فشل حذف العرض"
+-    }
+-  },
+-  "commissions": {
+-    "rulesTable": {
+-      "name": "اسم القاعدة",
+-      "attribute": "السمة",
+-      "fee": "الرسوم"
+-    }
+-  },
+   "$schema": "./$schema.json",
+   "general": {
+     "unknownError": "حدث خطأ غير معروف",
+@@ -2836,12 +2818,6 @@
+     }
+   },
+   "store": {
+-    "scheduledClosure": {
+-      "validation": {
+-        "closedFromRequired": "تاريخ بدء الإغلاق مطلوب",
+-        "closedFromInPast": "لا يمكن أن يكون تاريخ بدء الإغلاق في الماضي"
+-      }
+-    },
+     "domain": "المتجر",
+     "manageYourStoresDetails": "إدارة تفاصيل متجرك",
+     "editStore": "تحرير المتجر",
+@@ -2942,6 +2918,10 @@
+       }
+     },
+     "scheduledClosure": {
++      "validation": {
++        "closedFromRequired": "تاريخ بدء الإغلاق مطلوب",
++        "closedFromInPast": "لا يمكن أن يكون تاريخ بدء الإغلاق في الماضي"
++      },
+       "header": "إغلاق مجدول",
+       "edit": {
+         "header": "جدولة إغلاق المتجر",
+@@ -3801,6 +3781,15 @@
+     }
+   },
+   "views": {
++    "toasts": {
++      "created": "تم إنشاء العرض",
++      "createFailed": "فشل إنشاء العرض",
++      "updateActiveFailed": "فشل تحديث العرض النشط",
++      "updated": "تم تحديث العرض",
++      "updateFailed": "فشل تحديث العرض",
++      "deleted": "تم حذف العرض بنجاح",
++      "deleteFailed": "فشل حذف العرض"
++    },
+     "save": "حفظ",
+     "saveAsNew": "حفظ كعرض جديد",
+     "saveAsSystemDefault": "حفظ كافتراضي للنظام",
+@@ -4009,6 +3998,11 @@
+     "domain": "بنود العمولة"
+   },
+   "commissions": {
++    "rulesTable": {
++      "name": "اسم القاعدة",
++      "attribute": "السمة",
++      "fee": "الرسوم"
++    },
+     "domain": "العمولات",
+     "create": {
+       "header": "إنشاء قاعدة عمولة",
+@@ -4222,4 +4216,4 @@
+       "out_of_stock": "نفد المخزون"
+     }
+   }
+-}
+\ No newline at end of file
++}
+diff --git a/packages/admin/src/i18n/translations/bg.json b/packages/admin/src/i18n/translations/bg.json
+index 3eda2278a..35eab7695 100644
+--- a/packages/admin/src/i18n/translations/bg.json
++++ b/packages/admin/src/i18n/translations/bg.json
+@@ -1,22 +1,4 @@
+ {
+-  "views": {
+-    "toasts": {
+-      "created": "Изгледът е създаден",
+-      "createFailed": "Неуспешно създаване на изглед",
+-      "updateActiveFailed": "Неуспешно обновяване на активния изглед",
+-      "updated": "Изгледът е обновен",
+-      "updateFailed": "Неуспешно обновяване на изглед",
+-      "deleted": "Изгледът е изтрит успешно",
+-      "deleteFailed": "Неуспешно изтриване на изглед"
+-    }
+-  },
+-  "commissions": {
+-    "rulesTable": {
+-      "name": "Име на правилото",
+-      "attribute": "Атрибут",
+-      "fee": "Такса"
+-    }
+-  },
+   "$schema": "./$schema.json",
+   "general": {
+     "unknownError": "Възникна неизвестна грешка",
+@@ -2836,12 +2818,6 @@
+     }
+   },
+   "store": {
+-    "scheduledClosure": {
+-      "validation": {
+-        "closedFromRequired": "Изисква се начална дата на затваряне",
+-        "closedFromInPast": "Началната дата на затваряне не може да бъде в миналото"
+-      }
+-    },
+     "domain": "Магазин",
+     "manageYourStoresDetails": "Управлявайте детайлите на вашия магазин",
+     "editStore": "Редактиране на магазин",
+@@ -2942,6 +2918,10 @@
+       }
+     },
+     "scheduledClosure": {
++      "validation": {
++        "closedFromRequired": "Изисква се начална дата на затваряне",
++        "closedFromInPast": "Началната дата на затваряне не може да бъде в миналото"
++      },
+       "header": "Планирано затваряне",
+       "edit": {
+         "header": "Планиране на затваряне на магазина",
+@@ -3801,6 +3781,15 @@
+     }
+   },
+   "views": {
++    "toasts": {
++      "created": "Изгледът е създаден",
++      "createFailed": "Неуспешно създаване на изглед",
++      "updateActiveFailed": "Неуспешно обновяване на активния изглед",
++      "updated": "Изгледът е обновен",
++      "updateFailed": "Неуспешно обновяване на изглед",
++      "deleted": "Изгледът е изтрит успешно",
++      "deleteFailed": "Неуспешно изтриване на изглед"
++    },
+     "save": "Запази",
+     "saveAsNew": "Запазване като нов изглед",
+     "saveAsSystemDefault": "Запазване като системен изглед по подразбиране",
+@@ -4009,6 +3998,11 @@
+     "domain": "Редове на комисионата"
+   },
+   "commissions": {
++    "rulesTable": {
++      "name": "Име на правилото",
++      "attribute": "Атрибут",
++      "fee": "Такса"
++    },
+     "domain": "Комисиони",
+     "create": {
+       "header": "Създаване на правило за комисиона",
+diff --git a/packages/admin/src/i18n/translations/bs.json b/packages/admin/src/i18n/translations/bs.json
+index b631c8eea..f672c0573 100644
+--- a/packages/admin/src/i18n/translations/bs.json
++++ b/packages/admin/src/i18n/translations/bs.json
+@@ -1,22 +1,4 @@
+ {
+-  "views": {
+-    "toasts": {
+-      "created": "Prikaz je kreiran",
+-      "createFailed": "Kreiranje prikaza nije uspjelo",
+-      "updateActiveFailed": "Ažuriranje aktivnog prikaza nije uspjelo",
+-      "updated": "Prikaz je ažuriran",
+-      "updateFailed": "Ažuriranje prikaza nije uspjelo",
+-      "deleted": "Prikaz je uspješno obrisan",
+-      "deleteFailed": "Brisanje prikaza nije uspjelo"
+-    }
+-  },
+-  "commissions": {
+-    "rulesTable": {
+-      "name": "Naziv pravila",
+-      "attribute": "Atribut",
+-      "fee": "Provizija"
+-    }
+-  },
+   "$schema": "./$schema.json",
+   "general": {
+     "unknownError": "Došlo je do nepoznate greške",
+@@ -2835,12 +2817,6 @@
+     }
+   },
+   "store": {
+-    "scheduledClosure": {
+-      "validation": {
+-        "closedFromRequired": "Datum početka zatvaranja je obavezan",
+-        "closedFromInPast": "Datum početka zatvaranja ne može biti u prošlosti"
+-      }
+-    },
+     "domain": "Trgovina",
+     "manageYourStoresDetails": "Upravljajte podacima svoje trgovine",
+     "editStore": "Uredi trgovinu",
+@@ -2941,6 +2917,10 @@
+       }
+     },
+     "scheduledClosure": {
++      "validation": {
++        "closedFromRequired": "Datum početka zatvaranja je obavezan",
++        "closedFromInPast": "Datum početka zatvaranja ne može biti u prošlosti"
++      },
+       "header": "Zakazano zatvaranje",
+       "edit": {
+         "header": "Zakaži zatvaranje prodavnice",
+@@ -3799,6 +3779,15 @@
+     }
+   },
+   "views": {
++    "toasts": {
++      "created": "Prikaz je kreiran",
++      "createFailed": "Kreiranje prikaza nije uspjelo",
++      "updateActiveFailed": "Ažuriranje aktivnog prikaza nije uspjelo",
++      "updated": "Prikaz je ažuriran",
++      "updateFailed": "Ažuriranje prikaza nije uspjelo",
++      "deleted": "Prikaz je uspješno obrisan",
++      "deleteFailed": "Brisanje prikaza nije uspjelo"
++    },
+     "save": "Sačuvaj",
+     "saveAsNew": "Sačuvaj kao novi prikaz",
+     "saveAsSystemDefault": "Sačuvaj kao podrazumijevani sistemski",
+@@ -4007,6 +3996,11 @@
+     "domain": "Stavke provizije"
+   },
+   "commissions": {
++    "rulesTable": {
++      "name": "Naziv pravila",
++      "attribute": "Atribut",
++      "fee": "Provizija"
++    },
+     "domain": "Provizije",
+     "create": {
+       "header": "Kreiraj pravilo provizije",
+@@ -4220,4 +4214,4 @@
+       "out_of_stock": "Nema na zalihi"
+     }
+   }
+-}
+\ No newline at end of file
++}
+diff --git a/packages/admin/src/i18n/translations/cs.json b/packages/admin/src/i18n/translations/cs.json
+index 3169730b6..5b3c18e8c 100644
+--- a/packages/admin/src/i18n/translations/cs.json
++++ b/packages/admin/src/i18n/translations/cs.json
+@@ -1,22 +1,4 @@
+ {
+-  "views": {
+-    "toasts": {
+-      "created": "Zobrazení vytvořeno",
+-      "createFailed": "Nepodařilo se vytvořit zobrazení",
+-      "updateActiveFailed": "Nepodařilo se aktualizovat aktivní zobrazení",
+-      "updated": "Zobrazení aktualizováno",
+-      "updateFailed": "Nepodařilo se aktualizovat zobrazení",
+-      "deleted": "Zobrazení bylo úspěšně smazáno",
+-      "deleteFailed": "Nepodařilo se smazat zobrazení"
+-    }
+-  },
+-  "commissions": {
+-    "rulesTable": {
+-      "name": "Název pravidla",
+-      "attribute": "Atribut",
+-      "fee": "Poplatek"
+-    }
+-  },
+   "$schema": "./$schema.json",
+   "general": {
+     "unknownError": "Došlo k neznámé chybě",
+@@ -2833,12 +2815,6 @@
+     }
+   },
+   "store": {
+-    "scheduledClosure": {
+-      "validation": {
+-        "closedFromRequired": "Datum zahájení uzavření je povinné",
+-        "closedFromInPast": "Datum zahájení uzavření nemůže být v minulosti"
+-      }
+-    },
+     "domain": "Obchod",
+     "manageYourStoresDetails": "Spravujte detaily svého obchodu",
+     "editStore": "Upravit obchod",
+@@ -2939,6 +2915,10 @@
+       }
+     },
+     "scheduledClosure": {
++      "validation": {
++        "closedFromRequired": "Datum zahájení uzavření je povinné",
++        "closedFromInPast": "Datum zahájení uzavření nemůže být v minulosti"
++      },
+       "header": "Plánované uzavření",
+       "edit": {
+         "header": "Naplánovat uzavření obchodu",
+@@ -3797,6 +3777,15 @@
+     }
+   },
+   "views": {
++    "toasts": {
++      "created": "Zobrazení vytvořeno",
++      "createFailed": "Nepodařilo se vytvořit zobrazení",
++      "updateActiveFailed": "Nepodařilo se aktualizovat aktivní zobrazení",
++      "updated": "Zobrazení aktualizováno",
++      "updateFailed": "Nepodařilo se aktualizovat zobrazení",
++      "deleted": "Zobrazení bylo úspěšně smazáno",
++      "deleteFailed": "Nepodařilo se smazat zobrazení"
++    },
+     "save": "Uložit",
+     "saveAsNew": "Uložit jako nové zobrazení",
+     "saveAsSystemDefault": "Uložit jako výchozí systémové",
+@@ -4005,6 +3994,11 @@
+     "domain": "Řádky provizí"
+   },
+   "commissions": {
++    "rulesTable": {
++      "name": "Název pravidla",
++      "attribute": "Atribut",
++      "fee": "Poplatek"
++    },
+     "domain": "Provize",
+     "create": {
+       "header": "Vytvořit pravidlo provize",
+diff --git a/packages/admin/src/i18n/translations/de.json b/packages/admin/src/i18n/translations/de.json
+index bbcee3597..32fcc8d79 100644
+--- a/packages/admin/src/i18n/translations/de.json
++++ b/packages/admin/src/i18n/translations/de.json
+@@ -1,22 +1,4 @@
+ {
+-  "views": {
+-    "toasts": {
+-      "created": "Ansicht erstellt",
+-      "createFailed": "Ansicht konnte nicht erstellt werden",
+-      "updateActiveFailed": "Aktive Ansicht konnte nicht aktualisiert werden",
+-      "updated": "Ansicht aktualisiert",
+-      "updateFailed": "Ansicht konnte nicht aktualisiert werden",
+-      "deleted": "Ansicht erfolgreich gelöscht",
+-      "deleteFailed": "Ansicht konnte nicht gelöscht werden"
+-    }
+-  },
+-  "commissions": {
+-    "rulesTable": {
+-      "name": "Regelname",
+-      "attribute": "Attribut",
+-      "fee": "Gebühr"
+-    }
+-  },
+   "$schema": "./$schema.json",
+   "general": {
+     "unknownError": "Ein unbekannter Fehler ist aufgetreten",
+@@ -2837,12 +2819,6 @@
+     "deleteUserSuccess": "Benutzer {{name}} wurde erfolgreich entfernt."
+   },
+   "store": {
+-    "scheduledClosure": {
+-      "validation": {
+-        "closedFromRequired": "Das Startdatum der Schließung ist erforderlich",
+-        "closedFromInPast": "Das Startdatum der Schließung darf nicht in der Vergangenheit liegen"
+-      }
+-    },
+     "domain": "Shop",
+     "manageYourStoresDetails": "Verwalten Sie die Details Ihres Shops",
+     "editStore": "Shop bearbeiten",
+@@ -2943,6 +2919,10 @@
+       }
+     },
+     "scheduledClosure": {
++      "validation": {
++        "closedFromRequired": "Das Startdatum der Schließung ist erforderlich",
++        "closedFromInPast": "Das Startdatum der Schließung darf nicht in der Vergangenheit liegen"
++      },
+       "header": "Geplante Schließung",
+       "edit": {
+         "header": "Shop-Schließung planen",
+@@ -3802,6 +3782,15 @@
+     }
+   },
+   "views": {
++    "toasts": {
++      "created": "Ansicht erstellt",
++      "createFailed": "Ansicht konnte nicht erstellt werden",
++      "updateActiveFailed": "Aktive Ansicht konnte nicht aktualisiert werden",
++      "updated": "Ansicht aktualisiert",
++      "updateFailed": "Ansicht konnte nicht aktualisiert werden",
++      "deleted": "Ansicht erfolgreich gelöscht",
++      "deleteFailed": "Ansicht konnte nicht gelöscht werden"
++    },
+     "save": "Speichern",
+     "saveAsNew": "Als neue Ansicht speichern",
+     "saveAsSystemDefault": "Als Systemstandard speichern",
+@@ -4010,6 +3999,11 @@
+     "domain": "Provisionspositionen"
+   },
+   "commissions": {
++    "rulesTable": {
++      "name": "Regelname",
++      "attribute": "Attribut",
++      "fee": "Gebühr"
++    },
+     "domain": "Provisionen",
+     "create": {
+       "header": "Provisionsregel erstellen",
+@@ -4223,4 +4217,4 @@
+       "out_of_stock": "Nicht vorrätig"
+     }
+   }
+-}
+\ No newline at end of file
++}
+diff --git a/packages/admin/src/i18n/translations/el.json b/packages/admin/src/i18n/translations/el.json
+index 87e5d5c0d..bf1d99564 100644
+--- a/packages/admin/src/i18n/translations/el.json
++++ b/packages/admin/src/i18n/translations/el.json
+@@ -1,22 +1,4 @@
+ {
+-  "views": {
+-    "toasts": {
+-      "created": "Η προβολή δημιουργήθηκε",
+-      "createFailed": "Αποτυχία δημιουργίας προβολής",
+-      "updateActiveFailed": "Αποτυχία ενημέρωσης ενεργής προβολής",
+-      "updated": "Η προβολή ενημερώθηκε",
+-      "updateFailed": "Αποτυχία ενημέρωσης προβολής",
+-      "deleted": "Η προβολή διαγράφηκε με επιτυχία",
+-      "deleteFailed": "Αποτυχία διαγραφής προβολής"
+-    }
+-  },
+-  "commissions": {
+-    "rulesTable": {
+-      "name": "Όνομα κανόνα",
+-      "attribute": "Χαρακτηριστικό",
+-      "fee": "Χρέωση"
+-    }
+-  },
+   "$schema": "./$schema.json",
+   "general": {
+     "unknownError": "Παρουσιάστηκε άγνωστο σφάλμα",
+@@ -2836,12 +2818,6 @@
+     }
+   },
+   "store": {
+-    "scheduledClosure": {
+-      "validation": {
+-        "closedFromRequired": "Απαιτείται η ημερομηνία έναρξης κλεισίματος",
+-        "closedFromInPast": "Η ημερομηνία έναρξης κλεισίματος δεν μπορεί να είναι στο παρελθόν"
+-      }
+-    },
+     "domain": "Κατάστημα",
+     "manageYourStoresDetails": "Διαχειριστείτε τα στοιχεία του καταστήματός σας",
+     "editStore": "Επεξεργασία καταστήματος",
+@@ -2942,6 +2918,10 @@
+       }
+     },
+     "scheduledClosure": {
++      "validation": {
++        "closedFromRequired": "Απαιτείται η ημερομηνία έναρξης κλεισίματος",
++        "closedFromInPast": "Η ημερομηνία έναρξης κλεισίματος δεν μπορεί να είναι στο παρελθόν"
++      },
+       "header": "Προγραμματισμένο κλείσιμο",
+       "edit": {
+         "header": "Προγραμματισμός κλεισίματος καταστήματος",
+@@ -3801,6 +3781,15 @@
+     }
+   },
+   "views": {
++    "toasts": {
++      "created": "Η προβολή δημιουργήθηκε",
++      "createFailed": "Αποτυχία δημιουργίας προβολής",
++      "updateActiveFailed": "Αποτυχία ενημέρωσης ενεργής προβολής",
++      "updated": "Η προβολή ενημερώθηκε",
++      "updateFailed": "Αποτυχία ενημέρωσης προβολής",
++      "deleted": "Η προβολή διαγράφηκε με επιτυχία",
++      "deleteFailed": "Αποτυχία διαγραφής προβολής"
++    },
+     "save": "Αποθήκευση",
+     "saveAsNew": "Αποθήκευση ως νέας προβολής",
+     "saveAsSystemDefault": "Αποθήκευση ως προεπιλογή συστήματος",
+@@ -4009,6 +3998,11 @@
+     "domain": "Γραμμές προμήθειας"
+   },
+   "commissions": {
++    "rulesTable": {
++      "name": "Όνομα κανόνα",
++      "attribute": "Χαρακτηριστικό",
++      "fee": "Χρέωση"
++    },
+     "domain": "Προμήθειες",
+     "create": {
+       "header": "Δημιουργία κανόνα προμήθειας",
+diff --git a/packages/admin/src/i18n/translations/es.json b/packages/admin/src/i18n/translations/es.json
+index 2b0c5cfa8..6f4b4d279 100644
+--- a/packages/admin/src/i18n/translations/es.json
++++ b/packages/admin/src/i18n/translations/es.json
+@@ -1,22 +1,4 @@
+ {
+-  "views": {
+-    "toasts": {
+-      "created": "Vista creada",
+-      "createFailed": "Error al crear la vista",
+-      "updateActiveFailed": "Error al actualizar la vista activa",
+-      "updated": "Vista actualizada",
+-      "updateFailed": "Error al actualizar la vista",
+-      "deleted": "Vista eliminada correctamente",
+-      "deleteFailed": "Error al eliminar la vista"
+-    }
+-  },
+-  "commissions": {
+-    "rulesTable": {
+-      "name": "Nombre de la regla",
+-      "attribute": "Atributo",
+-      "fee": "Comisión"
+-    }
+-  },
+   "$schema": "./$schema.json",
+   "general": {
+     "unknownError": "Se ha producido un error desconocido",
+@@ -2853,12 +2835,6 @@
+     }
+   },
+   "store": {
+-    "scheduledClosure": {
+-      "validation": {
+-        "closedFromRequired": "La fecha de inicio del cierre es obligatoria",
+-        "closedFromInPast": "La fecha de inicio del cierre no puede estar en el pasado"
+-      }
+-    },
+     "domain": "Tienda",
+     "manageYourStoresDetails": "Gestiona los detalles de tu tienda",
+     "editStore": "Editar tienda",
+@@ -2959,6 +2935,10 @@
+       }
+     },
+     "scheduledClosure": {
++      "validation": {
++        "closedFromRequired": "La fecha de inicio del cierre es obligatoria",
++        "closedFromInPast": "La fecha de inicio del cierre no puede estar en el pasado"
++      },
+       "header": "Cierre programado",
+       "edit": {
+         "header": "Programar cierre de la tienda",
+@@ -3795,6 +3775,15 @@
+     }
+   },
+   "views": {
++    "toasts": {
++      "created": "Vista creada",
++      "createFailed": "Error al crear la vista",
++      "updateActiveFailed": "Error al actualizar la vista activa",
++      "updated": "Vista actualizada",
++      "updateFailed": "Error al actualizar la vista",
++      "deleted": "Vista eliminada correctamente",
++      "deleteFailed": "Error al eliminar la vista"
++    },
+     "save": "Guardar",
+     "saveAsNew": "Guardar como nueva vista",
+     "saveAsSystemDefault": "Guardar como predeterminada del sistema",
+@@ -4003,6 +3992,11 @@
+     "domain": "Líneas de comisión"
+   },
+   "commissions": {
++    "rulesTable": {
++      "name": "Nombre de la regla",
++      "attribute": "Atributo",
++      "fee": "Comisión"
++    },
+     "domain": "Comisiones",
+     "create": {
+       "header": "Crear regla de comisión",
+@@ -4216,4 +4210,4 @@
+       "out_of_stock": "Sin stock"
+     }
+   }
+-}
+\ No newline at end of file
++}
+diff --git a/packages/admin/src/i18n/translations/fa.json b/packages/admin/src/i18n/translations/fa.json
+index e4f7d23c5..e4663f60a 100644
+--- a/packages/admin/src/i18n/translations/fa.json
++++ b/packages/admin/src/i18n/translations/fa.json
+@@ -1,22 +1,4 @@
+ {
+-  "views": {
+-    "toasts": {
+-      "created": "نما ایجاد شد",
+-      "createFailed": "ایجاد نما ناموفق بود",
+-      "updateActiveFailed": "به‌روزرسانی نمای فعال ناموفق بود",
+-      "updated": "نما به‌روزرسانی شد",
+-      "updateFailed": "به‌روزرسانی نما ناموفق بود",
+-      "deleted": "نما با موفقیت حذف شد",
+-      "deleteFailed": "حذف نما ناموفق بود"
+-    }
+-  },
+-  "commissions": {
+-    "rulesTable": {
+-      "name": "نام قاعده",
+-      "attribute": "ویژگی",
+-      "fee": "کارمزد"
+-    }
+-  },
+   "$schema": "./$schema.json",
+   "general": {
+     "unknownError": "خطای ناشناخته‌ای رخ داد",
+@@ -2836,12 +2818,6 @@
+     }
+   },
+   "store": {
+-    "scheduledClosure": {
+-      "validation": {
+-        "closedFromRequired": "تاریخ شروع تعطیلی الزامی است",
+-        "closedFromInPast": "تاریخ شروع تعطیلی نمی‌تواند در گذشته باشد"
+-      }
+-    },
+     "domain": "فروشگاه",
+     "manageYourStoresDetails": "جزئیات فروشگاه خود را مدیریت کنید",
+     "editStore": "ویرایش فروشگاه",
+@@ -2942,6 +2918,10 @@
+       }
+     },
+     "scheduledClosure": {
++      "validation": {
++        "closedFromRequired": "تاریخ شروع تعطیلی الزامی است",
++        "closedFromInPast": "تاریخ شروع تعطیلی نمی‌تواند در گذشته باشد"
++      },
+       "header": "تعطیلی زمان‌بندی‌شده",
+       "edit": {
+         "header": "زمان‌بندی تعطیلی فروشگاه",
+@@ -3801,6 +3781,15 @@
+     }
+   },
+   "views": {
++    "toasts": {
++      "created": "نما ایجاد شد",
++      "createFailed": "ایجاد نما ناموفق بود",
++      "updateActiveFailed": "به‌روزرسانی نمای فعال ناموفق بود",
++      "updated": "نما به‌روزرسانی شد",
++      "updateFailed": "به‌روزرسانی نما ناموفق بود",
++      "deleted": "نما با موفقیت حذف شد",
++      "deleteFailed": "حذف نما ناموفق بود"
++    },
+     "save": "ذخیره",
+     "saveAsNew": "ذخیره به‌عنوان نمای جدید",
+     "saveAsSystemDefault": "ذخیره به‌عنوان پیش‌فرض سیستم",
+@@ -4009,6 +3998,11 @@
+     "domain": "خطوط کمیسیون"
+   },
+   "commissions": {
++    "rulesTable": {
++      "name": "نام قاعده",
++      "attribute": "ویژگی",
++      "fee": "کارمزد"
++    },
+     "domain": "کمیسیون‌ها",
+     "create": {
+       "header": "ایجاد قانون کمیسیون",
+@@ -4222,4 +4216,4 @@
+       "out_of_stock": "ناموجود"
+     }
+   }
+-}
+\ No newline at end of file
++}
+diff --git a/packages/admin/src/i18n/translations/fr.json b/packages/admin/src/i18n/translations/fr.json
+index fb0a39f75..477d6b61e 100644
+--- a/packages/admin/src/i18n/translations/fr.json
++++ b/packages/admin/src/i18n/translations/fr.json
+@@ -1,22 +1,4 @@
+ {
+-  "views": {
+-    "toasts": {
+-      "created": "Vue créée",
+-      "createFailed": "Échec de la création de la vue",
+-      "updateActiveFailed": "Échec de la mise à jour de la vue active",
+-      "updated": "Vue mise à jour",
+-      "updateFailed": "Échec de la mise à jour de la vue",
+-      "deleted": "Vue supprimée avec succès",
+-      "deleteFailed": "Échec de la suppression de la vue"
+-    }
+-  },
+-  "commissions": {
+-    "rulesTable": {
+-      "name": "Nom de la règle",
+-      "attribute": "Attribut",
+-      "fee": "Frais"
+-    }
+-  },
+   "$schema": "./$schema.json",
+   "general": {
+     "unknownError": "Une erreur inconnue s'est produite",
+@@ -2837,12 +2819,6 @@
+     "deleteUserSuccess": "L'utilisateur {{name}} a été supprimé avec succès."
+   },
+   "store": {
+-    "scheduledClosure": {
+-      "validation": {
+-        "closedFromRequired": "La date de début de fermeture est obligatoire",
+-        "closedFromInPast": "La date de début de fermeture ne peut pas être dans le passé"
+-      }
+-    },
+     "domain": "Boutique",
+     "manageYourStoresDetails": "Gérer les détails de votre boutique.",
+     "editStore": "Modifier la boutique",
+@@ -2943,6 +2919,10 @@
+       }
+     },
+     "scheduledClosure": {
++      "validation": {
++        "closedFromRequired": "La date de début de fermeture est obligatoire",
++        "closedFromInPast": "La date de début de fermeture ne peut pas être dans le passé"
++      },
+       "header": "Fermeture programmée",
+       "edit": {
+         "header": "Programmer la fermeture de la boutique",
+@@ -3802,6 +3782,15 @@
+     }
+   },
+   "views": {
++    "toasts": {
++      "created": "Vue créée",
++      "createFailed": "Échec de la création de la vue",
++      "updateActiveFailed": "Échec de la mise à jour de la vue active",
++      "updated": "Vue mise à jour",
++      "updateFailed": "Échec de la mise à jour de la vue",
++      "deleted": "Vue supprimée avec succès",
++      "deleteFailed": "Échec de la suppression de la vue"
++    },
+     "save": "Enregistrer",
+     "saveAsNew": "Enregistrer comme nouvelle vue",
+     "saveAsSystemDefault": "Enregistrer comme vue par défaut du système",
+@@ -4010,6 +3999,11 @@
+     "domain": "Lignes de commission"
+   },
+   "commissions": {
++    "rulesTable": {
++      "name": "Nom de la règle",
++      "attribute": "Attribut",
++      "fee": "Frais"
++    },
+     "domain": "Commissions",
+     "create": {
+       "header": "Créer une règle de commission",
+@@ -4223,4 +4217,4 @@
+       "out_of_stock": "Rupture de stock"
+     }
+   }
+-}
+\ No newline at end of file
++}
+diff --git a/packages/admin/src/i18n/translations/he.json b/packages/admin/src/i18n/translations/he.json
+index 5658e13d0..01533a407 100644
+--- a/packages/admin/src/i18n/translations/he.json
++++ b/packages/admin/src/i18n/translations/he.json
+@@ -1,22 +1,4 @@
+ {
+-  "views": {
+-    "toasts": {
+-      "created": "התצוגה נוצרה",
+-      "createFailed": "יצירת התצוגה נכשלה",
+-      "updateActiveFailed": "עדכון התצוגה הפעילה נכשל",
+-      "updated": "התצוגה עודכנה",
+-      "updateFailed": "עדכון התצוגה נכשל",
+-      "deleted": "התצוגה נמחקה בהצלחה",
+-      "deleteFailed": "מחיקת התצוגה נכשלה"
+-    }
+-  },
+-  "commissions": {
+-    "rulesTable": {
+-      "name": "שם הכלל",
+-      "attribute": "מאפיין",
+-      "fee": "עמלה"
+-    }
+-  },
+   "$schema": "./$schema.json",
+   "general": {
+     "unknownError": "אירעה שגיאה לא ידועה",
+@@ -2833,12 +2815,6 @@
+     }
+   },
+   "store": {
+-    "scheduledClosure": {
+-      "validation": {
+-        "closedFromRequired": "תאריך תחילת הסגירה נדרש",
+-        "closedFromInPast": "תאריך תחילת הסגירה לא יכול להיות בעבר"
+-      }
+-    },
+     "domain": "חנות",
+     "manageYourStoresDetails": "נהל את פרטי החנות שלך",
+     "editStore": "ערוך חנות",
+@@ -2939,6 +2915,10 @@
+       }
+     },
+     "scheduledClosure": {
++      "validation": {
++        "closedFromRequired": "תאריך תחילת הסגירה נדרש",
++        "closedFromInPast": "תאריך תחילת הסגירה לא יכול להיות בעבר"
++      },
+       "header": "סגירה מתוזמנת",
+       "edit": {
+         "header": "תזמן סגירת חנות",
+@@ -3797,6 +3777,15 @@
+     }
+   },
+   "views": {
++    "toasts": {
++      "created": "התצוגה נוצרה",
++      "createFailed": "יצירת התצוגה נכשלה",
++      "updateActiveFailed": "עדכון התצוגה הפעילה נכשל",
++      "updated": "התצוגה עודכנה",
++      "updateFailed": "עדכון התצוגה נכשל",
++      "deleted": "התצוגה נמחקה בהצלחה",
++      "deleteFailed": "מחיקת התצוגה נכשלה"
++    },
+     "save": "שמור",
+     "saveAsNew": "שמור כתצוגה חדשה",
+     "saveAsSystemDefault": "שמור כברירת מחדל של המערכת",
+@@ -4005,6 +3994,11 @@
+     "domain": "שורות עמלה"
+   },
+   "commissions": {
++    "rulesTable": {
++      "name": "שם הכלל",
++      "attribute": "מאפיין",
++      "fee": "עמלה"
++    },
+     "domain": "עמלות",
+     "create": {
+       "header": "צור כלל עמלה",
+@@ -4218,4 +4212,4 @@
+       "out_of_stock": "אזל מהמלאי"
+     }
+   }
+-}
+\ No newline at end of file
++}
+diff --git a/packages/admin/src/i18n/translations/hu.json b/packages/admin/src/i18n/translations/hu.json
+index 29800c991..c0cb0694e 100644
+--- a/packages/admin/src/i18n/translations/hu.json
++++ b/packages/admin/src/i18n/translations/hu.json
+@@ -1,22 +1,4 @@
+ {
+-  "views": {
+-    "toasts": {
+-      "created": "Nézet létrehozva",
+-      "createFailed": "A nézet létrehozása nem sikerült",
+-      "updateActiveFailed": "Az aktív nézet frissítése nem sikerült",
+-      "updated": "Nézet frissítve",
+-      "updateFailed": "A nézet frissítése nem sikerült",
+-      "deleted": "Nézet sikeresen törölve",
+-      "deleteFailed": "A nézet törlése nem sikerült"
+-    }
+-  },
+-  "commissions": {
+-    "rulesTable": {
+-      "name": "Szabály neve",
+-      "attribute": "Attribútum",
+-      "fee": "Díj"
+-    }
+-  },
+   "$schema": "./$schema.json",
+   "general": {
+     "unknownError": "Ismeretlen hiba történt",
+@@ -2835,12 +2817,6 @@
+     }
+   },
+   "store": {
+-    "scheduledClosure": {
+-      "validation": {
+-        "closedFromRequired": "A zárás kezdő dátuma kötelező",
+-        "closedFromInPast": "A zárás kezdő dátuma nem lehet a múltban"
+-      }
+-    },
+     "domain": "Áruház",
+     "manageYourStoresDetails": "Kezelje áruházának részleteit",
+     "editStore": "Áruház szerkesztése",
+@@ -2941,6 +2917,10 @@
+       }
+     },
+     "scheduledClosure": {
++      "validation": {
++        "closedFromRequired": "A zárás kezdő dátuma kötelező",
++        "closedFromInPast": "A zárás kezdő dátuma nem lehet a múltban"
++      },
+       "header": "Ütemezett bezárás",
+       "edit": {
+         "header": "Áruház bezárásának ütemezése",
+@@ -3800,6 +3780,15 @@
+     }
+   },
+   "views": {
++    "toasts": {
++      "created": "Nézet létrehozva",
++      "createFailed": "A nézet létrehozása nem sikerült",
++      "updateActiveFailed": "Az aktív nézet frissítése nem sikerült",
++      "updated": "Nézet frissítve",
++      "updateFailed": "A nézet frissítése nem sikerült",
++      "deleted": "Nézet sikeresen törölve",
++      "deleteFailed": "A nézet törlése nem sikerült"
++    },
+     "save": "Mentés",
+     "saveAsNew": "Mentés új nézetként",
+     "saveAsSystemDefault": "Mentés rendszer-alapértelmezettként",
+@@ -4008,6 +3997,11 @@
+     "domain": "Jutaléksorok"
+   },
+   "commissions": {
++    "rulesTable": {
++      "name": "Szabály neve",
++      "attribute": "Attribútum",
++      "fee": "Díj"
++    },
+     "domain": "Jutalékok",
+     "create": {
+       "header": "Jutalékszabály létrehozása",
+@@ -4221,4 +4215,4 @@
+       "out_of_stock": "Nincs készleten"
+     }
+   }
+-}
+\ No newline at end of file
++}
+diff --git a/packages/admin/src/i18n/translations/id.json b/packages/admin/src/i18n/translations/id.json
+index 29c6661b2..2f064dc83 100644
+--- a/packages/admin/src/i18n/translations/id.json
++++ b/packages/admin/src/i18n/translations/id.json
+@@ -1,22 +1,4 @@
+ {
+-  "views": {
+-    "toasts": {
+-      "created": "Tampilan dibuat",
+-      "createFailed": "Gagal membuat tampilan",
+-      "updateActiveFailed": "Gagal memperbarui tampilan aktif",
+-      "updated": "Tampilan diperbarui",
+-      "updateFailed": "Gagal memperbarui tampilan",
+-      "deleted": "Tampilan berhasil dihapus",
+-      "deleteFailed": "Gagal menghapus tampilan"
+-    }
+-  },
+-  "commissions": {
+-    "rulesTable": {
+-      "name": "Nama Aturan",
+-      "attribute": "Atribut",
+-      "fee": "Biaya"
+-    }
+-  },
+   "$schema": "./$schema.json",
+   "general": {
+     "unknownError": "Terjadi kesalahan yang tidak diketahui",
+@@ -2833,12 +2815,6 @@
+     }
+   },
+   "store": {
+-    "scheduledClosure": {
+-      "validation": {
+-        "closedFromRequired": "Tanggal mulai penutupan wajib diisi",
+-        "closedFromInPast": "Tanggal mulai penutupan tidak boleh di masa lalu"
+-      }
+-    },
+     "domain": "Toko",
+     "manageYourStoresDetails": "Kelola detail toko Anda",
+     "editStore": "Edit toko",
+@@ -2939,6 +2915,10 @@
+       }
+     },
+     "scheduledClosure": {
++      "validation": {
++        "closedFromRequired": "Tanggal mulai penutupan wajib diisi",
++        "closedFromInPast": "Tanggal mulai penutupan tidak boleh di masa lalu"
++      },
+       "header": "Penutupan Terjadwal",
+       "edit": {
+         "header": "Jadwalkan Penutupan Toko",
+@@ -3797,6 +3777,15 @@
+     }
+   },
+   "views": {
++    "toasts": {
++      "created": "Tampilan dibuat",
++      "createFailed": "Gagal membuat tampilan",
++      "updateActiveFailed": "Gagal memperbarui tampilan aktif",
++      "updated": "Tampilan diperbarui",
++      "updateFailed": "Gagal memperbarui tampilan",
++      "deleted": "Tampilan berhasil dihapus",
++      "deleteFailed": "Gagal menghapus tampilan"
++    },
+     "save": "Simpan",
+     "saveAsNew": "Simpan sebagai tampilan baru",
+     "saveAsSystemDefault": "Simpan sebagai default sistem",
+@@ -4005,6 +3994,11 @@
+     "domain": "Baris Komisi"
+   },
+   "commissions": {
++    "rulesTable": {
++      "name": "Nama Aturan",
++      "attribute": "Atribut",
++      "fee": "Biaya"
++    },
+     "domain": "Komisi",
+     "create": {
+       "header": "Buat Aturan Komisi",
+diff --git a/packages/admin/src/i18n/translations/it.json b/packages/admin/src/i18n/translations/it.json
+index 5af1c3755..710c3ee07 100644
+--- a/packages/admin/src/i18n/translations/it.json
++++ b/packages/admin/src/i18n/translations/it.json
+@@ -1,22 +1,4 @@
+ {
+-  "views": {
+-    "toasts": {
+-      "created": "Vista creata",
+-      "createFailed": "Impossibile creare la vista",
+-      "updateActiveFailed": "Impossibile aggiornare la vista attiva",
+-      "updated": "Vista aggiornata",
+-      "updateFailed": "Impossibile aggiornare la vista",
+-      "deleted": "Vista eliminata con successo",
+-      "deleteFailed": "Impossibile eliminare la vista"
+-    }
+-  },
+-  "commissions": {
+-    "rulesTable": {
+-      "name": "Nome della regola",
+-      "attribute": "Attributo",
+-      "fee": "Commissione"
+-    }
+-  },
+   "$schema": "./$schema.json",
+   "general": {
+     "unknownError": "Si è verificato un errore sconosciuto",
+@@ -2837,12 +2819,6 @@
+     "deleteUserSuccess": "L'utente {{name}} è stato rimosso con successo."
+   },
+   "store": {
+-    "scheduledClosure": {
+-      "validation": {
+-        "closedFromRequired": "La data di inizio della chiusura è obbligatoria",
+-        "closedFromInPast": "La data di inizio della chiusura non può essere nel passato"
+-      }
+-    },
+     "domain": "Negozio",
+     "manageYourStoresDetails": "Gestisci i dettagli del tuo negozio",
+     "editStore": "Modifica negozio",
+@@ -2943,6 +2919,10 @@
+       }
+     },
+     "scheduledClosure": {
++      "validation": {
++        "closedFromRequired": "La data di inizio della chiusura è obbligatoria",
++        "closedFromInPast": "La data di inizio della chiusura non può essere nel passato"
++      },
+       "header": "Chiusura programmata",
+       "edit": {
+         "header": "Programma chiusura negozio",
+@@ -3802,6 +3782,15 @@
+     }
+   },
+   "views": {
++    "toasts": {
++      "created": "Vista creata",
++      "createFailed": "Impossibile creare la vista",
++      "updateActiveFailed": "Impossibile aggiornare la vista attiva",
++      "updated": "Vista aggiornata",
++      "updateFailed": "Impossibile aggiornare la vista",
++      "deleted": "Vista eliminata con successo",
++      "deleteFailed": "Impossibile eliminare la vista"
++    },
+     "save": "Salva",
+     "saveAsNew": "Salva come nuova vista",
+     "saveAsSystemDefault": "Salva come predefinita di sistema",
+@@ -4010,6 +3999,11 @@
+     "domain": "Righe commissione"
+   },
+   "commissions": {
++    "rulesTable": {
++      "name": "Nome della regola",
++      "attribute": "Attributo",
++      "fee": "Commissione"
++    },
+     "domain": "Commissioni",
+     "create": {
+       "header": "Crea regola di commissione",
+@@ -4223,4 +4217,4 @@
+       "out_of_stock": "Esaurito"
+     }
+   }
+-}
+\ No newline at end of file
++}
+diff --git a/packages/admin/src/i18n/translations/ja.json b/packages/admin/src/i18n/translations/ja.json
+index 6257f9ce3..ad7debacc 100644
+--- a/packages/admin/src/i18n/translations/ja.json
++++ b/packages/admin/src/i18n/translations/ja.json
+@@ -1,22 +1,4 @@
+ {
+-  "views": {
+-    "toasts": {
+-      "created": "ビューを作成しました",
+-      "createFailed": "ビューの作成に失敗しました",
+-      "updateActiveFailed": "アクティブなビューの更新に失敗しました",
+-      "updated": "ビューを更新しました",
+-      "updateFailed": "ビューの更新に失敗しました",
+-      "deleted": "ビューを削除しました",
+-      "deleteFailed": "ビューの削除に失敗しました"
+-    }
+-  },
+-  "commissions": {
+-    "rulesTable": {
+-      "name": "ルール名",
+-      "attribute": "属性",
+-      "fee": "手数料"
+-    }
+-  },
+   "$schema": "./$schema.json",
+   "general": {
+     "unknownError": "不明なエラーが発生しました",
+@@ -2837,12 +2819,6 @@
+     "deleteUserSuccess": "ユーザー {{name}} を削除しました。"
+   },
+   "store": {
+-    "scheduledClosure": {
+-      "validation": {
+-        "closedFromRequired": "閉店開始日を入力してください",
+-        "closedFromInPast": "閉店開始日を過去の日付にすることはできません"
+-      }
+-    },
+     "domain": "ストア",
+     "manageYourStoresDetails": "ストアの詳細を管理します。",
+     "editStore": "ストアを編集",
+@@ -2943,6 +2919,10 @@
+       }
+     },
+     "scheduledClosure": {
++      "validation": {
++        "closedFromRequired": "閉店開始日を入力してください",
++        "closedFromInPast": "閉店開始日を過去の日付にすることはできません"
++      },
+       "header": "休業予定",
+       "edit": {
+         "header": "ストアの休業を予定",
+@@ -3802,6 +3782,15 @@
+     }
+   },
+   "views": {
++    "toasts": {
++      "created": "ビューを作成しました",
++      "createFailed": "ビューの作成に失敗しました",
++      "updateActiveFailed": "アクティブなビューの更新に失敗しました",
++      "updated": "ビューを更新しました",
++      "updateFailed": "ビューの更新に失敗しました",
++      "deleted": "ビューを削除しました",
++      "deleteFailed": "ビューの削除に失敗しました"
++    },
+     "save": "保存",
+     "saveAsNew": "新しいビューとして保存",
+     "saveAsSystemDefault": "システムのデフォルトとして保存",
+@@ -4010,6 +3999,11 @@
+     "domain": "手数料明細"
+   },
+   "commissions": {
++    "rulesTable": {
++      "name": "ルール名",
++      "attribute": "属性",
++      "fee": "手数料"
++    },
+     "domain": "手数料",
+     "create": {
+       "header": "手数料ルールを作成",
+@@ -4223,4 +4217,4 @@
+       "out_of_stock": "在庫切れ"
+     }
+   }
+-}
+\ No newline at end of file
++}
+diff --git a/packages/admin/src/i18n/translations/ko.json b/packages/admin/src/i18n/translations/ko.json
+index 4f9bc45f6..5dda978a7 100644
+--- a/packages/admin/src/i18n/translations/ko.json
++++ b/packages/admin/src/i18n/translations/ko.json
+@@ -1,22 +1,4 @@
+ {
+-  "views": {
+-    "toasts": {
+-      "created": "보기가 생성되었습니다",
+-      "createFailed": "보기 생성에 실패했습니다",
+-      "updateActiveFailed": "활성 보기 업데이트에 실패했습니다",
+-      "updated": "보기가 업데이트되었습니다",
+-      "updateFailed": "보기 업데이트에 실패했습니다",
+-      "deleted": "보기가 삭제되었습니다",
+-      "deleteFailed": "보기 삭제에 실패했습니다"
+-    }
+-  },
+-  "commissions": {
+-    "rulesTable": {
+-      "name": "규칙 이름",
+-      "attribute": "속성",
+-      "fee": "수수료"
+-    }
+-  },
+   "$schema": "./$schema.json",
+   "general": {
+     "unknownError": "알 수 없는 오류가 발생했습니다",
+@@ -2833,12 +2815,6 @@
+     }
+   },
+   "store": {
+-    "scheduledClosure": {
+-      "validation": {
+-        "closedFromRequired": "휴무 시작일을 입력해야 합니다",
+-        "closedFromInPast": "휴무 시작일은 과거 날짜로 설정할 수 없습니다"
+-      }
+-    },
+     "domain": "스토어",
+     "manageYourStoresDetails": "스토어의 상세 정보를 관리합니다",
+     "editStore": "스토어 편집",
+@@ -2939,6 +2915,10 @@
+       }
+     },
+     "scheduledClosure": {
++      "validation": {
++        "closedFromRequired": "휴무 시작일을 입력해야 합니다",
++        "closedFromInPast": "휴무 시작일은 과거 날짜로 설정할 수 없습니다"
++      },
+       "header": "예정된 휴점",
+       "edit": {
+         "header": "스토어 휴점 예약",
+@@ -3797,6 +3777,15 @@
+     }
+   },
+   "views": {
++    "toasts": {
++      "created": "보기가 생성되었습니다",
++      "createFailed": "보기 생성에 실패했습니다",
++      "updateActiveFailed": "활성 보기 업데이트에 실패했습니다",
++      "updated": "보기가 업데이트되었습니다",
++      "updateFailed": "보기 업데이트에 실패했습니다",
++      "deleted": "보기가 삭제되었습니다",
++      "deleteFailed": "보기 삭제에 실패했습니다"
++    },
+     "save": "저장",
+     "saveAsNew": "새 보기로 저장",
+     "saveAsSystemDefault": "시스템 기본값으로 저장",
+@@ -4005,6 +3994,11 @@
+     "domain": "수수료 내역"
+   },
+   "commissions": {
++    "rulesTable": {
++      "name": "규칙 이름",
++      "attribute": "속성",
++      "fee": "수수료"
++    },
+     "domain": "수수료",
+     "create": {
+       "header": "수수료 규칙 생성",
+diff --git a/packages/admin/src/i18n/translations/lt.json b/packages/admin/src/i18n/translations/lt.json
+index 450c21225..b893bf3e8 100644
+--- a/packages/admin/src/i18n/translations/lt.json
++++ b/packages/admin/src/i18n/translations/lt.json
+@@ -1,22 +1,4 @@
+ {
+-  "views": {
+-    "toasts": {
+-      "created": "Rodinys sukurtas",
+-      "createFailed": "Nepavyko sukurti rodinio",
+-      "updateActiveFailed": "Nepavyko atnaujinti aktyvaus rodinio",
+-      "updated": "Rodinys atnaujintas",
+-      "updateFailed": "Nepavyko atnaujinti rodinio",
+-      "deleted": "Rodinys sėkmingai ištrintas",
+-      "deleteFailed": "Nepavyko ištrinti rodinio"
+-    }
+-  },
+-  "commissions": {
+-    "rulesTable": {
+-      "name": "Taisyklės pavadinimas",
+-      "attribute": "Atributas",
+-      "fee": "Mokestis"
+-    }
+-  },
+   "$schema": "./$schema.json",
+   "general": {
+     "unknownError": "Įvyko nežinoma klaida",
+@@ -2836,12 +2818,6 @@
+     }
+   },
+   "store": {
+-    "scheduledClosure": {
+-      "validation": {
+-        "closedFromRequired": "Uždarymo pradžios data yra privaloma",
+-        "closedFromInPast": "Uždarymo pradžios data negali būti praeityje"
+-      }
+-    },
+     "domain": "Parduotuvė",
+     "manageYourStoresDetails": "Tvarkykite savo parduotuvės nustatymus",
+     "editStore": "Keisti parduotuvę",
+@@ -2942,6 +2918,10 @@
+       }
+     },
+     "scheduledClosure": {
++      "validation": {
++        "closedFromRequired": "Uždarymo pradžios data yra privaloma",
++        "closedFromInPast": "Uždarymo pradžios data negali būti praeityje"
++      },
+       "header": "Suplanuotas uždarymas",
+       "edit": {
+         "header": "Suplanuoti parduotuvės uždarymą",
+@@ -3801,6 +3781,15 @@
+     }
+   },
+   "views": {
++    "toasts": {
++      "created": "Rodinys sukurtas",
++      "createFailed": "Nepavyko sukurti rodinio",
++      "updateActiveFailed": "Nepavyko atnaujinti aktyvaus rodinio",
++      "updated": "Rodinys atnaujintas",
++      "updateFailed": "Nepavyko atnaujinti rodinio",
++      "deleted": "Rodinys sėkmingai ištrintas",
++      "deleteFailed": "Nepavyko ištrinti rodinio"
++    },
+     "save": "Išsaugoti",
+     "saveAsNew": "Išsaugoti kaip naują rodinį",
+     "saveAsSystemDefault": "Išsaugoti kaip sistemos numatytąjį",
+@@ -4009,6 +3998,11 @@
+     "domain": "Komisinio mokesčio eilutės"
+   },
+   "commissions": {
++    "rulesTable": {
++      "name": "Taisyklės pavadinimas",
++      "attribute": "Atributas",
++      "fee": "Mokestis"
++    },
+     "domain": "Komisiniai mokesčiai",
+     "create": {
+       "header": "Sukurti komisinio mokesčio taisyklę",
+@@ -4222,4 +4216,4 @@
+       "out_of_stock": "Nėra atsargų"
+     }
+   }
+-}
+\ No newline at end of file
++}
+diff --git a/packages/admin/src/i18n/translations/mk.json b/packages/admin/src/i18n/translations/mk.json
+index cd790bd0a..f6ba8f349 100644
+--- a/packages/admin/src/i18n/translations/mk.json
++++ b/packages/admin/src/i18n/translations/mk.json
+@@ -1,22 +1,4 @@
+ {
+-  "views": {
+-    "toasts": {
+-      "created": "Прегледот е создаден",
+-      "createFailed": "Неуспешно создавање на преглед",
+-      "updateActiveFailed": "Неуспешно ажурирање на активниот преглед",
+-      "updated": "Прегледот е ажуриран",
+-      "updateFailed": "Неуспешно ажурирање на преглед",
+-      "deleted": "Прегледот е успешно избришан",
+-      "deleteFailed": "Неуспешно бришење на преглед"
+-    }
+-  },
+-  "commissions": {
+-    "rulesTable": {
+-      "name": "Име на правило",
+-      "attribute": "Атрибут",
+-      "fee": "Провизија"
+-    }
+-  },
+   "$schema": "./$schema.json",
+   "general": {
+     "unknownError": "Настана непозната грешка",
+@@ -2836,12 +2818,6 @@
+     }
+   },
+   "store": {
+-    "scheduledClosure": {
+-      "validation": {
+-        "closedFromRequired": "Потребна е датумот на почеток на затворање",
+-        "closedFromInPast": "Датумот на почеток на затворање не може да биде во минатото"
+-      }
+-    },
+     "domain": "Продавница",
+     "manageYourStoresDetails": "Управувајте со деталите на вашата продавница",
+     "editStore": "Уреди продавница",
+@@ -2942,6 +2918,10 @@
+       }
+     },
+     "scheduledClosure": {
++      "validation": {
++        "closedFromRequired": "Потребна е датумот на почеток на затворање",
++        "closedFromInPast": "Датумот на почеток на затворање не може да биде во минатото"
++      },
+       "header": "Закажано затворање",
+       "edit": {
+         "header": "Закажи затворање на продавницата",
+@@ -3801,6 +3781,15 @@
+     }
+   },
+   "views": {
++    "toasts": {
++      "created": "Прегледот е создаден",
++      "createFailed": "Неуспешно создавање на преглед",
++      "updateActiveFailed": "Неуспешно ажурирање на активниот преглед",
++      "updated": "Прегледот е ажуриран",
++      "updateFailed": "Неуспешно ажурирање на преглед",
++      "deleted": "Прегледот е успешно избришан",
++      "deleteFailed": "Неуспешно бришење на преглед"
++    },
+     "save": "Зачувај",
+     "saveAsNew": "Зачувај како нов приказ",
+     "saveAsSystemDefault": "Зачувај како системски стандард",
+@@ -4009,6 +3998,11 @@
+     "domain": "Ставки на провизија"
+   },
+   "commissions": {
++    "rulesTable": {
++      "name": "Име на правило",
++      "attribute": "Атрибут",
++      "fee": "Провизија"
++    },
+     "domain": "Провизии",
+     "create": {
+       "header": "Креирај правило за провизија",
+@@ -4222,4 +4216,4 @@
+       "out_of_stock": "Нема на залиха"
+     }
+   }
+-}
+\ No newline at end of file
++}
+diff --git a/packages/admin/src/i18n/translations/mn.json b/packages/admin/src/i18n/translations/mn.json
+index 433602309..550de3b27 100644
+--- a/packages/admin/src/i18n/translations/mn.json
++++ b/packages/admin/src/i18n/translations/mn.json
+@@ -1,22 +1,4 @@
+ {
+-  "views": {
+-    "toasts": {
+-      "created": "Харагдац үүслээ",
+-      "createFailed": "Харагдац үүсгэж чадсангүй",
+-      "updateActiveFailed": "Идэвхтэй харагдацыг шинэчилж чадсангүй",
+-      "updated": "Харагдац шинэчлэгдлээ",
+-      "updateFailed": "Харагдацыг шинэчилж чадсангүй",
+-      "deleted": "Харагдац амжилттай устгагдлаа",
+-      "deleteFailed": "Харагдацыг устгаж чадсангүй"
+-    }
+-  },
+-  "commissions": {
+-    "rulesTable": {
+-      "name": "Дүрмийн нэр",
+-      "attribute": "Атрибут",
+-      "fee": "Шимтгэл"
+-    }
+-  },
+   "$schema": "./$schema.json",
+   "general": {
+     "unknownError": "Тодорхойгүй алдаа гарлаа",
+@@ -2836,12 +2818,6 @@
+     }
+   },
+   "store": {
+-    "scheduledClosure": {
+-      "validation": {
+-        "closedFromRequired": "Хаах эхлэх огноо заавал шаардлагатай",
+-        "closedFromInPast": "Хаах эхлэх огноо өнгөрсөн хугацаанд байж болохгүй"
+-      }
+-    },
+     "domain": "Дэлгүүр",
+     "manageYourStoresDetails": "Таны дэлгүүрийн дэлгэрэнгүй мэдээллийг удирдах",
+     "editStore": "Дэлгүүрийг засах",
+@@ -2942,6 +2918,10 @@
+       }
+     },
+     "scheduledClosure": {
++      "validation": {
++        "closedFromRequired": "Хаах эхлэх огноо заавал шаардлагатай",
++        "closedFromInPast": "Хаах эхлэх огноо өнгөрсөн хугацаанд байж болохгүй"
++      },
+       "header": "Товлосон хаалт",
+       "edit": {
+         "header": "Дэлгүүрийн хаалтыг товлох",
+@@ -3801,6 +3781,15 @@
+     }
+   },
+   "views": {
++    "toasts": {
++      "created": "Харагдац үүслээ",
++      "createFailed": "Харагдац үүсгэж чадсангүй",
++      "updateActiveFailed": "Идэвхтэй харагдацыг шинэчилж чадсангүй",
++      "updated": "Харагдац шинэчлэгдлээ",
++      "updateFailed": "Харагдацыг шинэчилж чадсангүй",
++      "deleted": "Харагдац амжилттай устгагдлаа",
++      "deleteFailed": "Харагдацыг устгаж чадсангүй"
++    },
+     "save": "Хадгалах",
+     "saveAsNew": "Шинэ харагдац болгон хадгалах",
+     "saveAsSystemDefault": "Системийн үндсэн болгон хадгалах",
+@@ -4009,6 +3998,11 @@
+     "domain": "Шимтгэлийн мөрүүд"
+   },
+   "commissions": {
++    "rulesTable": {
++      "name": "Дүрмийн нэр",
++      "attribute": "Атрибут",
++      "fee": "Шимтгэл"
++    },
+     "domain": "Шимтгэлүүд",
+     "create": {
+       "header": "Шимтгэлийн дүрэм үүсгэх",
+diff --git a/packages/admin/src/i18n/translations/nl.json b/packages/admin/src/i18n/translations/nl.json
+index c99103f5d..04839ed42 100644
+--- a/packages/admin/src/i18n/translations/nl.json
++++ b/packages/admin/src/i18n/translations/nl.json
+@@ -1,22 +1,4 @@
+ {
+-  "views": {
+-    "toasts": {
+-      "created": "Weergave aangemaakt",
+-      "createFailed": "Aanmaken van weergave mislukt",
+-      "updateActiveFailed": "Bijwerken van actieve weergave mislukt",
+-      "updated": "Weergave bijgewerkt",
+-      "updateFailed": "Bijwerken van weergave mislukt",
+-      "deleted": "Weergave succesvol verwijderd",
+-      "deleteFailed": "Verwijderen van weergave mislukt"
+-    }
+-  },
+-  "commissions": {
+-    "rulesTable": {
+-      "name": "Regelnaam",
+-      "attribute": "Attribuut",
+-      "fee": "Vergoeding"
+-    }
+-  },
+   "$schema": "./$schema.json",
+   "general": {
+     "unknownError": "Er is een onbekende fout opgetreden",
+@@ -2835,12 +2817,6 @@
+     }
+   },
+   "store": {
+-    "scheduledClosure": {
+-      "validation": {
+-        "closedFromRequired": "Startdatum van sluiting is verplicht",
+-        "closedFromInPast": "Startdatum van sluiting mag niet in het verleden liggen"
+-      }
+-    },
+     "domain": "Winkel",
+     "manageYourStoresDetails": "Beheer de gegevens van uw winkel",
+     "editStore": "Winkel bewerken",
+@@ -2941,6 +2917,10 @@
+       }
+     },
+     "scheduledClosure": {
++      "validation": {
++        "closedFromRequired": "Startdatum van sluiting is verplicht",
++        "closedFromInPast": "Startdatum van sluiting mag niet in het verleden liggen"
++      },
+       "header": "Geplande sluiting",
+       "edit": {
+         "header": "Winkelsluiting plannen",
+@@ -3800,6 +3780,15 @@
+     }
+   },
+   "views": {
++    "toasts": {
++      "created": "Weergave aangemaakt",
++      "createFailed": "Aanmaken van weergave mislukt",
++      "updateActiveFailed": "Bijwerken van actieve weergave mislukt",
++      "updated": "Weergave bijgewerkt",
++      "updateFailed": "Bijwerken van weergave mislukt",
++      "deleted": "Weergave succesvol verwijderd",
++      "deleteFailed": "Verwijderen van weergave mislukt"
++    },
+     "save": "Opslaan",
+     "saveAsNew": "Opslaan als nieuwe weergave",
+     "saveAsSystemDefault": "Opslaan als systeemstandaard",
+@@ -4008,6 +3997,11 @@
+     "domain": "Commissieregels"
+   },
+   "commissions": {
++    "rulesTable": {
++      "name": "Regelnaam",
++      "attribute": "Attribuut",
++      "fee": "Vergoeding"
++    },
+     "domain": "Commissies",
+     "create": {
+       "header": "Commissieregel aanmaken",
+@@ -4221,4 +4215,4 @@
+       "out_of_stock": "Niet op voorraad"
+     }
+   }
+-}
+\ No newline at end of file
++}
+diff --git a/packages/admin/src/i18n/translations/pl.json b/packages/admin/src/i18n/translations/pl.json
+index eededef75..461b60782 100644
+--- a/packages/admin/src/i18n/translations/pl.json
++++ b/packages/admin/src/i18n/translations/pl.json
+@@ -1,11 +1,4 @@
+ {
+-  "commissions": {
+-    "rulesTable": {
+-      "name": "Nazwa reguły",
+-      "attribute": "Atrybut",
+-      "fee": "Opłata"
+-    }
+-  },
+   "$schema": "./$schema.json",
+   "general": {
+     "unknownError": "Wystąpił nieznany błąd",
+@@ -4210,6 +4203,11 @@
+     }
+   },
+   "commissions": {
++    "rulesTable": {
++      "name": "Nazwa reguły",
++      "attribute": "Atrybut",
++      "fee": "Opłata"
++    },
+     "domain": "Prowizje",
+     "create": {
+       "header": "Utwórz regułę prowizji",
+diff --git a/packages/admin/src/i18n/translations/ptBR.json b/packages/admin/src/i18n/translations/ptBR.json
+index a48c5c0aa..61511a738 100644
+--- a/packages/admin/src/i18n/translations/ptBR.json
++++ b/packages/admin/src/i18n/translations/ptBR.json
+@@ -1,22 +1,4 @@
+ {
+-  "views": {
+-    "toasts": {
+-      "created": "Visualização criada",
+-      "createFailed": "Falha ao criar visualização",
+-      "updateActiveFailed": "Falha ao atualizar a visualização ativa",
+-      "updated": "Visualização atualizada",
+-      "updateFailed": "Falha ao atualizar visualização",
+-      "deleted": "Visualização excluída com sucesso",
+-      "deleteFailed": "Falha ao excluir visualização"
+-    }
+-  },
+-  "commissions": {
+-    "rulesTable": {
+-      "name": "Nome da regra",
+-      "attribute": "Atributo",
+-      "fee": "Taxa"
+-    }
+-  },
+   "$schema": "./$schema.json",
+   "general": {
+     "unknownError": "Ocorreu um erro desconhecido",
+@@ -2837,12 +2819,6 @@
+     "deleteUserSuccess": "O usuário {{name}} foi removido com sucesso."
+   },
+   "store": {
+-    "scheduledClosure": {
+-      "validation": {
+-        "closedFromRequired": "A data de início do fechamento é obrigatória",
+-        "closedFromInPast": "A data de início do fechamento não pode estar no passado"
+-      }
+-    },
+     "domain": "Loja",
+     "manageYourStoresDetails": "Gerencie os detalhes da sua loja",
+     "editStore": "Editar loja",
+@@ -2943,6 +2919,10 @@
+       }
+     },
+     "scheduledClosure": {
++      "validation": {
++        "closedFromRequired": "A data de início do fechamento é obrigatória",
++        "closedFromInPast": "A data de início do fechamento não pode estar no passado"
++      },
+       "header": "Fechamento programado",
+       "edit": {
+         "header": "Agendar fechamento da loja",
+@@ -3802,6 +3782,15 @@
+     }
+   },
+   "views": {
++    "toasts": {
++      "created": "Visualização criada",
++      "createFailed": "Falha ao criar visualização",
++      "updateActiveFailed": "Falha ao atualizar a visualização ativa",
++      "updated": "Visualização atualizada",
++      "updateFailed": "Falha ao atualizar visualização",
++      "deleted": "Visualização excluída com sucesso",
++      "deleteFailed": "Falha ao excluir visualização"
++    },
+     "save": "Salvar",
+     "saveAsNew": "Salvar como nova visualização",
+     "saveAsSystemDefault": "Salvar como padrão do sistema",
+@@ -4010,6 +3999,11 @@
+     "domain": "Linhas de comissão"
+   },
+   "commissions": {
++    "rulesTable": {
++      "name": "Nome da regra",
++      "attribute": "Atributo",
++      "fee": "Taxa"
++    },
+     "domain": "Comissões",
+     "create": {
+       "header": "Criar regra de comissão",
+@@ -4223,4 +4217,4 @@
+       "out_of_stock": "Sem estoque"
+     }
+   }
+-}
+\ No newline at end of file
++}
+diff --git a/packages/admin/src/i18n/translations/ro.json b/packages/admin/src/i18n/translations/ro.json
+index 4b0b3744d..59196f497 100644
+--- a/packages/admin/src/i18n/translations/ro.json
++++ b/packages/admin/src/i18n/translations/ro.json
+@@ -1,22 +1,4 @@
+ {
+-  "views": {
+-    "toasts": {
+-      "created": "Vizualizare creată",
+-      "createFailed": "Crearea vizualizării a eșuat",
+-      "updateActiveFailed": "Actualizarea vizualizării active a eșuat",
+-      "updated": "Vizualizare actualizată",
+-      "updateFailed": "Actualizarea vizualizării a eșuat",
+-      "deleted": "Vizualizarea a fost ștearsă cu succes",
+-      "deleteFailed": "Ștergerea vizualizării a eșuat"
+-    }
+-  },
+-  "commissions": {
+-    "rulesTable": {
+-      "name": "Numele regulii",
+-      "attribute": "Atribut",
+-      "fee": "Comision"
+-    }
+-  },
+   "$schema": "./$schema.json",
+   "general": {
+     "unknownError": "A apărut o eroare necunoscută",
+@@ -2836,12 +2818,6 @@
+     }
+   },
+   "store": {
+-    "scheduledClosure": {
+-      "validation": {
+-        "closedFromRequired": "Data de început a închiderii este obligatorie",
+-        "closedFromInPast": "Data de început a închiderii nu poate fi în trecut"
+-      }
+-    },
+     "domain": "Magazin",
+     "manageYourStoresDetails": "Gestionați detaliile magazinului dvs",
+     "editStore": "Editează magazinul",
+@@ -2942,6 +2918,10 @@
+       }
+     },
+     "scheduledClosure": {
++      "validation": {
++        "closedFromRequired": "Data de început a închiderii este obligatorie",
++        "closedFromInPast": "Data de început a închiderii nu poate fi în trecut"
++      },
+       "header": "Închidere programată",
+       "edit": {
+         "header": "Programează închiderea magazinului",
+@@ -3801,6 +3781,15 @@
+     }
+   },
+   "views": {
++    "toasts": {
++      "created": "Vizualizare creată",
++      "createFailed": "Crearea vizualizării a eșuat",
++      "updateActiveFailed": "Actualizarea vizualizării active a eșuat",
++      "updated": "Vizualizare actualizată",
++      "updateFailed": "Actualizarea vizualizării a eșuat",
++      "deleted": "Vizualizarea a fost ștearsă cu succes",
++      "deleteFailed": "Ștergerea vizualizării a eșuat"
++    },
+     "save": "Salva",
+     "saveAsNew": "Salvează ca vizualizare nouă",
+     "saveAsSystemDefault": "Salvează ca implicit de sistem",
+@@ -4009,6 +3998,11 @@
+     "domain": "Linii de comision"
+   },
+   "commissions": {
++    "rulesTable": {
++      "name": "Numele regulii",
++      "attribute": "Atribut",
++      "fee": "Comision"
++    },
+     "domain": "Comisioane",
+     "create": {
+       "header": "Creează regulă de comision",
+diff --git a/packages/admin/src/i18n/translations/ru.json b/packages/admin/src/i18n/translations/ru.json
+index 8476a4fbd..027dbd1ef 100644
+--- a/packages/admin/src/i18n/translations/ru.json
++++ b/packages/admin/src/i18n/translations/ru.json
+@@ -1,22 +1,4 @@
+ {
+-  "views": {
+-    "toasts": {
+-      "created": "Представление создано",
+-      "createFailed": "Не удалось создать представление",
+-      "updateActiveFailed": "Не удалось обновить активное представление",
+-      "updated": "Представление обновлено",
+-      "updateFailed": "Не удалось обновить представление",
+-      "deleted": "Представление успешно удалено",
+-      "deleteFailed": "Не удалось удалить представление"
+-    }
+-  },
+-  "commissions": {
+-    "rulesTable": {
+-      "name": "Название правила",
+-      "attribute": "Атрибут",
+-      "fee": "Комиссия"
+-    }
+-  },
+   "$schema": "./$schema.json",
+   "general": {
+     "unknownError": "Произошла неизвестная ошибка",
+@@ -2836,12 +2818,6 @@
+     }
+   },
+   "store": {
+-    "scheduledClosure": {
+-      "validation": {
+-        "closedFromRequired": "Укажите дату начала закрытия",
+-        "closedFromInPast": "Дата начала закрытия не может быть в прошлом"
+-      }
+-    },
+     "domain": "Магазин",
+     "manageYourStoresDetails": "Управляйте данными вашего магазина",
+     "editStore": "Редактировать магазин",
+@@ -2942,6 +2918,10 @@
+       }
+     },
+     "scheduledClosure": {
++      "validation": {
++        "closedFromRequired": "Укажите дату начала закрытия",
++        "closedFromInPast": "Дата начала закрытия не может быть в прошлом"
++      },
+       "header": "Запланированное закрытие",
+       "edit": {
+         "header": "Запланировать закрытие магазина",
+@@ -3801,6 +3781,15 @@
+     }
+   },
+   "views": {
++    "toasts": {
++      "created": "Представление создано",
++      "createFailed": "Не удалось создать представление",
++      "updateActiveFailed": "Не удалось обновить активное представление",
++      "updated": "Представление обновлено",
++      "updateFailed": "Не удалось обновить представление",
++      "deleted": "Представление успешно удалено",
++      "deleteFailed": "Не удалось удалить представление"
++    },
+     "save": "Сохранить",
+     "saveAsNew": "Сохранить как новое представление",
+     "saveAsSystemDefault": "Сохранить как системное по умолчанию",
+@@ -4009,6 +3998,11 @@
+     "domain": "Строки комиссии"
+   },
+   "commissions": {
++    "rulesTable": {
++      "name": "Название правила",
++      "attribute": "Атрибут",
++      "fee": "Комиссия"
++    },
+     "domain": "Комиссии",
+     "create": {
+       "header": "Создать правило комиссии",
+diff --git a/packages/admin/src/i18n/translations/th.json b/packages/admin/src/i18n/translations/th.json
+index 613abe78c..01ffd3fc1 100644
+--- a/packages/admin/src/i18n/translations/th.json
++++ b/packages/admin/src/i18n/translations/th.json
+@@ -1,22 +1,4 @@
+ {
+-  "views": {
+-    "toasts": {
+-      "created": "สร้างมุมมองแล้ว",
+-      "createFailed": "ไม่สามารถสร้างมุมมองได้",
+-      "updateActiveFailed": "ไม่สามารถอัปเดตมุมมองที่ใช้งานอยู่ได้",
+-      "updated": "อัปเดตมุมมองแล้ว",
+-      "updateFailed": "ไม่สามารถอัปเดตมุมมองได้",
+-      "deleted": "ลบมุมมองสำเร็จแล้ว",
+-      "deleteFailed": "ไม่สามารถลบมุมมองได้"
+-    }
+-  },
+-  "commissions": {
+-    "rulesTable": {
+-      "name": "ชื่อกฎ",
+-      "attribute": "คุณลักษณะ",
+-      "fee": "ค่าธรรมเนียม"
+-    }
+-  },
+   "$schema": "./$schema.json",
+   "general": {
+     "unknownError": "เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ",
+@@ -2837,12 +2819,6 @@
+     "deleteUserSuccess": "ลบผู้ใช้ {{name}} สำเร็จแล้ว"
+   },
+   "store": {
+-    "scheduledClosure": {
+-      "validation": {
+-        "closedFromRequired": "จำเป็นต้องระบุวันที่เริ่มปิดร้าน",
+-        "closedFromInPast": "วันที่เริ่มปิดร้านต้องไม่เป็นวันที่ผ่านมาแล้ว"
+-      }
+-    },
+     "domain": "ร้านค้า",
+     "manageYourStoresDetails": "จัดการรายละเอียดร้านค้าของคุณ",
+     "editStore": "แก้ไขร้านค้า",
+@@ -2943,6 +2919,10 @@
+       }
+     },
+     "scheduledClosure": {
++      "validation": {
++        "closedFromRequired": "จำเป็นต้องระบุวันที่เริ่มปิดร้าน",
++        "closedFromInPast": "วันที่เริ่มปิดร้านต้องไม่เป็นวันที่ผ่านมาแล้ว"
++      },
+       "header": "การปิดร้านตามกำหนดการ",
+       "edit": {
+         "header": "กำหนดวันปิดร้าน",
+@@ -3802,6 +3782,15 @@
+     }
+   },
+   "views": {
++    "toasts": {
++      "created": "สร้างมุมมองแล้ว",
++      "createFailed": "ไม่สามารถสร้างมุมมองได้",
++      "updateActiveFailed": "ไม่สามารถอัปเดตมุมมองที่ใช้งานอยู่ได้",
++      "updated": "อัปเดตมุมมองแล้ว",
++      "updateFailed": "ไม่สามารถอัปเดตมุมมองได้",
++      "deleted": "ลบมุมมองสำเร็จแล้ว",
++      "deleteFailed": "ไม่สามารถลบมุมมองได้"
++    },
+     "save": "บันทึก",
+     "saveAsNew": "บันทึกเป็นมุมมองใหม่",
+     "saveAsSystemDefault": "บันทึกเป็นค่าเริ่มต้นของระบบ",
+@@ -4010,6 +3999,11 @@
+     "domain": "รายการค่าคอมมิชชัน"
+   },
+   "commissions": {
++    "rulesTable": {
++      "name": "ชื่อกฎ",
++      "attribute": "คุณลักษณะ",
++      "fee": "ค่าธรรมเนียม"
++    },
+     "domain": "ค่าคอมมิชชัน",
+     "create": {
+       "header": "สร้างกฎค่าคอมมิชชัน",
+@@ -4223,4 +4217,4 @@
+       "out_of_stock": "สินค้าหมด"
+     }
+   }
+-}
+\ No newline at end of file
++}
+diff --git a/packages/admin/src/i18n/translations/tr.json b/packages/admin/src/i18n/translations/tr.json
+index 34dbd02a3..829e47ecb 100644
+--- a/packages/admin/src/i18n/translations/tr.json
++++ b/packages/admin/src/i18n/translations/tr.json
+@@ -1,22 +1,4 @@
+ {
+-  "views": {
+-    "toasts": {
+-      "created": "Görünüm oluşturuldu",
+-      "createFailed": "Görünüm oluşturulamadı",
+-      "updateActiveFailed": "Aktif görünüm güncellenemedi",
+-      "updated": "Görünüm güncellendi",
+-      "updateFailed": "Görünüm güncellenemedi",
+-      "deleted": "Görünüm başarıyla silindi",
+-      "deleteFailed": "Görünüm silinemedi"
+-    }
+-  },
+-  "commissions": {
+-    "rulesTable": {
+-      "name": "Kural Adı",
+-      "attribute": "Özellik",
+-      "fee": "Ücret"
+-    }
+-  },
+   "$schema": "./$schema.json",
+   "general": {
+     "unknownError": "Bilinmeyen bir hata oluştu",
+@@ -2836,12 +2818,6 @@
+     }
+   },
+   "store": {
+-    "scheduledClosure": {
+-      "validation": {
+-        "closedFromRequired": "Kapanış başlangıç tarihi zorunludur",
+-        "closedFromInPast": "Kapanış başlangıç tarihi geçmişte olamaz"
+-      }
+-    },
+     "domain": "Mağaza",
+     "manageYourStoresDetails": "Mağazanızın detaylarını yönetin",
+     "editStore": "Mağazayı Düzenle",
+@@ -2942,6 +2918,10 @@
+       }
+     },
+     "scheduledClosure": {
++      "validation": {
++        "closedFromRequired": "Kapanış başlangıç tarihi zorunludur",
++        "closedFromInPast": "Kapanış başlangıç tarihi geçmişte olamaz"
++      },
+       "header": "Planlanmış Kapanış",
+       "edit": {
+         "header": "Mağaza Kapanışı Planla",
+@@ -3801,6 +3781,15 @@
+     }
+   },
+   "views": {
++    "toasts": {
++      "created": "Görünüm oluşturuldu",
++      "createFailed": "Görünüm oluşturulamadı",
++      "updateActiveFailed": "Aktif görünüm güncellenemedi",
++      "updated": "Görünüm güncellendi",
++      "updateFailed": "Görünüm güncellenemedi",
++      "deleted": "Görünüm başarıyla silindi",
++      "deleteFailed": "Görünüm silinemedi"
++    },
+     "save": "Kaydet",
+     "saveAsNew": "Yeni görünüm olarak kaydet",
+     "saveAsSystemDefault": "Sistem varsayılanı olarak kaydet",
+@@ -4009,6 +3998,11 @@
+     "domain": "Komisyon Satırları"
+   },
+   "commissions": {
++    "rulesTable": {
++      "name": "Kural Adı",
++      "attribute": "Özellik",
++      "fee": "Ücret"
++    },
+     "domain": "Komisyonlar",
+     "create": {
+       "header": "Komisyon Kuralı Oluştur",
+@@ -4222,4 +4216,4 @@
+       "out_of_stock": "Stokta yok"
+     }
+   }
+-}
+\ No newline at end of file
++}
+diff --git a/packages/admin/src/i18n/translations/uk.json b/packages/admin/src/i18n/translations/uk.json
+index 48ba8b341..4ede047e8 100644
+--- a/packages/admin/src/i18n/translations/uk.json
++++ b/packages/admin/src/i18n/translations/uk.json
+@@ -1,22 +1,4 @@
+ {
+-  "views": {
+-    "toasts": {
+-      "created": "Подання створено",
+-      "createFailed": "Не вдалося створити подання",
+-      "updateActiveFailed": "Не вдалося оновити активне подання",
+-      "updated": "Подання оновлено",
+-      "updateFailed": "Не вдалося оновити подання",
+-      "deleted": "Подання успішно видалено",
+-      "deleteFailed": "Не вдалося видалити подання"
+-    }
+-  },
+-  "commissions": {
+-    "rulesTable": {
+-      "name": "Назва правила",
+-      "attribute": "Атрибут",
+-      "fee": "Комісія"
+-    }
+-  },
+   "$schema": "./$schema.json",
+   "general": {
+     "unknownError": "Сталася невідома помилка",
+@@ -2837,12 +2819,6 @@
+     "deleteUserSuccess": "Користувача {{name}} успішно видалено."
+   },
+   "store": {
+-    "scheduledClosure": {
+-      "validation": {
+-        "closedFromRequired": "Вкажіть дату початку закриття",
+-        "closedFromInPast": "Дата початку закриття не може бути в минулому"
+-      }
+-    },
+     "domain": "Магазин",
+     "manageYourStoresDetails": "Керуйте деталями вашого магазину",
+     "editStore": "Редагувати магазин",
+@@ -2943,6 +2919,10 @@
+       }
+     },
+     "scheduledClosure": {
++      "validation": {
++        "closedFromRequired": "Вкажіть дату початку закриття",
++        "closedFromInPast": "Дата початку закриття не може бути в минулому"
++      },
+       "header": "Заплановане закриття",
+       "edit": {
+         "header": "Запланувати закриття магазину",
+@@ -3802,6 +3782,15 @@
+     }
+   },
+   "views": {
++    "toasts": {
++      "created": "Подання створено",
++      "createFailed": "Не вдалося створити подання",
++      "updateActiveFailed": "Не вдалося оновити активне подання",
++      "updated": "Подання оновлено",
++      "updateFailed": "Не вдалося оновити подання",
++      "deleted": "Подання успішно видалено",
++      "deleteFailed": "Не вдалося видалити подання"
++    },
+     "save": "Зберегти",
+     "saveAsNew": "Зберегти як новий вигляд",
+     "saveAsSystemDefault": "Зберегти як системний за замовчуванням",
+@@ -4010,6 +3999,11 @@
+     "domain": "Рядки комісії"
+   },
+   "commissions": {
++    "rulesTable": {
++      "name": "Назва правила",
++      "attribute": "Атрибут",
++      "fee": "Комісія"
++    },
+     "domain": "Комісії",
+     "create": {
+       "header": "Створити правило комісії",
+@@ -4223,4 +4217,4 @@
+       "out_of_stock": "Немає в наявності"
+     }
+   }
+-}
+\ No newline at end of file
++}
+diff --git a/packages/admin/src/i18n/translations/vi.json b/packages/admin/src/i18n/translations/vi.json
+index de1f19f17..d93ef7684 100644
+--- a/packages/admin/src/i18n/translations/vi.json
++++ b/packages/admin/src/i18n/translations/vi.json
+@@ -1,22 +1,4 @@
+ {
+-  "views": {
+-    "toasts": {
+-      "created": "Đã tạo chế độ xem",
+-      "createFailed": "Không thể tạo chế độ xem",
+-      "updateActiveFailed": "Không thể cập nhật chế độ xem đang hoạt động",
+-      "updated": "Đã cập nhật chế độ xem",
+-      "updateFailed": "Không thể cập nhật chế độ xem",
+-      "deleted": "Đã xóa chế độ xem thành công",
+-      "deleteFailed": "Không thể xóa chế độ xem"
+-    }
+-  },
+-  "commissions": {
+-    "rulesTable": {
+-      "name": "Tên quy tắc",
+-      "attribute": "Thuộc tính",
+-      "fee": "Phí"
+-    }
+-  },
+   "$schema": "./$schema.json",
+   "general": {
+     "unknownError": "Đã xảy ra lỗi không xác định",
+@@ -2833,12 +2815,6 @@
+     }
+   },
+   "store": {
+-    "scheduledClosure": {
+-      "validation": {
+-        "closedFromRequired": "Ngày bắt đầu đóng cửa là bắt buộc",
+-        "closedFromInPast": "Ngày bắt đầu đóng cửa không thể ở trong quá khứ"
+-      }
+-    },
+     "domain": "Cửa hàng",
+     "manageYourStoresDetails": "Quản lý chi tiết cửa hàng của bạn",
+     "editStore": "Chỉnh sửa cửa hàng",
+@@ -2939,6 +2915,10 @@
+       }
+     },
+     "scheduledClosure": {
++      "validation": {
++        "closedFromRequired": "Ngày bắt đầu đóng cửa là bắt buộc",
++        "closedFromInPast": "Ngày bắt đầu đóng cửa không thể ở trong quá khứ"
++      },
+       "header": "Lịch tạm đóng cửa",
+       "edit": {
+         "header": "Lên lịch tạm đóng cửa",
+@@ -3797,6 +3777,15 @@
+     }
+   },
+   "views": {
++    "toasts": {
++      "created": "Đã tạo chế độ xem",
++      "createFailed": "Không thể tạo chế độ xem",
++      "updateActiveFailed": "Không thể cập nhật chế độ xem đang hoạt động",
++      "updated": "Đã cập nhật chế độ xem",
++      "updateFailed": "Không thể cập nhật chế độ xem",
++      "deleted": "Đã xóa chế độ xem thành công",
++      "deleteFailed": "Không thể xóa chế độ xem"
++    },
+     "save": "Lưu",
+     "saveAsNew": "Lưu thành chế độ xem mới",
+     "saveAsSystemDefault": "Lưu làm mặc định hệ thống",
+@@ -4005,6 +3994,11 @@
+     "domain": "Dòng hoa hồng"
+   },
+   "commissions": {
++    "rulesTable": {
++      "name": "Tên quy tắc",
++      "attribute": "Thuộc tính",
++      "fee": "Phí"
++    },
+     "domain": "Hoa hồng",
+     "create": {
+       "header": "Tạo quy tắc hoa hồng",
+@@ -4218,4 +4212,4 @@
+       "out_of_stock": "Hết hàng"
+     }
+   }
+-}
+\ No newline at end of file
++}
+diff --git a/packages/admin/src/i18n/translations/zhCN.json b/packages/admin/src/i18n/translations/zhCN.json
+index 0ca5414c3..dde6e1302 100644
+--- a/packages/admin/src/i18n/translations/zhCN.json
++++ b/packages/admin/src/i18n/translations/zhCN.json
+@@ -1,22 +1,4 @@
+ {
+-  "views": {
+-    "toasts": {
+-      "created": "视图已创建",
+-      "createFailed": "创建视图失败",
+-      "updateActiveFailed": "更新当前视图失败",
+-      "updated": "视图已更新",
+-      "updateFailed": "更新视图失败",
+-      "deleted": "视图已成功删除",
+-      "deleteFailed": "删除视图失败"
+-    }
+-  },
+-  "commissions": {
+-    "rulesTable": {
+-      "name": "规则名称",
+-      "attribute": "属性",
+-      "fee": "费用"
+-    }
+-  },
+   "$schema": "./$schema.json",
+   "general": {
+     "unknownError": "发生未知错误",
+@@ -2833,12 +2815,6 @@
+     }
+   },
+   "store": {
+-    "scheduledClosure": {
+-      "validation": {
+-        "closedFromRequired": "必须填写关闭开始日期",
+-        "closedFromInPast": "关闭开始日期不能是过去的日期"
+-      }
+-    },
+     "domain": "商店",
+     "manageYourStoresDetails": "管理您的商店详细信息",
+     "editStore": "编辑商店",
+@@ -2939,6 +2915,10 @@
+       }
+     },
+     "scheduledClosure": {
++      "validation": {
++        "closedFromRequired": "必须填写关闭开始日期",
++        "closedFromInPast": "关闭开始日期不能是过去的日期"
++      },
+       "header": "计划闭店",
+       "edit": {
+         "header": "安排店铺闭店",
+@@ -3797,6 +3777,15 @@
+     }
+   },
+   "views": {
++    "toasts": {
++      "created": "视图已创建",
++      "createFailed": "创建视图失败",
++      "updateActiveFailed": "更新当前视图失败",
++      "updated": "视图已更新",
++      "updateFailed": "更新视图失败",
++      "deleted": "视图已成功删除",
++      "deleteFailed": "删除视图失败"
++    },
+     "save": "保存",
+     "saveAsNew": "另存为新视图",
+     "saveAsSystemDefault": "保存为系统默认",
+@@ -4005,6 +3994,11 @@
+     "domain": "佣金明细"
+   },
+   "commissions": {
++    "rulesTable": {
++      "name": "规则名称",
++      "attribute": "属性",
++      "fee": "费用"
++    },
+     "domain": "佣金",
+     "create": {
+       "header": "创建佣金规则",
+@@ -4218,4 +4212,4 @@
+       "out_of_stock": "缺货"
+     }
+   }
+-}
+\ No newline at end of file
++}
