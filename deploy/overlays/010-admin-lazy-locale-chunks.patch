@@ -1,0 +1,297 @@
+# 010 — the admin panel no longer ships all 29 locales to every user.
+#
+# packages/admin/src/i18n/translations/index.ts statically imported 29 JSON
+# files and handed them to i18next as `resources`. tsup could not split what is
+# reachable from one object literal, so the whole catalogue landed in a single
+# 7.84 MB chunk (5.8 MB of it JSON) that every user downloaded to read one
+# language.
+#
+# English stays eager — it is `fallbackLng`, so i18next must resolve it
+# synchronously before first render. The other 28 become dynamic import()s
+# behind a zero-dependency i18next backend module, which lets the bundler emit
+# one chunk per locale and fetch only the active one. Largest chunk drops from
+# 7.84 MB to 540 KB.
+#
+# `partialBundledLanguages: true` is required: without it i18next sees partial
+# resources for a language and never calls the backend.
+#
+# Override precedence is preserved. The consumer's `virtual:mercur/i18n` entry
+# is merged over each locale as it lands, which is what the eager deepMerge did.
+#
+# No new dependency: the backend is a plain BackendModule, not
+# i18next-resources-to-backend.
+
+diff --git a/packages/admin/src/components/utilities/i18n/i18n.tsx b/packages/admin/src/components/utilities/i18n/i18n.tsx
+index 2151fc5a1..3459a81ae 100644
+--- a/packages/admin/src/components/utilities/i18n/i18n.tsx
++++ b/packages/admin/src/components/utilities/i18n/i18n.tsx
+@@ -1,9 +1,10 @@
+ import i18n from "i18next";
++import type { BackendModule, ReadCallback } from "i18next";
+ import LanguageDetector from "i18next-browser-languagedetector";
+ import { initReactI18next } from "react-i18next";
+ 
+ import { defaultI18nOptions } from "../../../i18n/config";
+-import translations from "../../../i18n/translations";
++import translations, { translationLoaders } from "../../../i18n/translations";
+ import customI18nResources from "virtual:mercur/i18n";
+ import config from "virtual:mercur/config";
+ 
+@@ -31,6 +32,48 @@ function deepMerge(
+   return result;
+ }
+ 
++const customResources = customI18nResources as Record<
++  string,
++  { translation?: Record<string, any> } | undefined
++>;
++
++const customTranslationFor = (language: string): Record<string, any> =>
++  customResources?.[language]?.translation ?? {};
++
++// Only `en` ships in the bundle. Every other locale is fetched on first use, so
++// a user reading one language no longer downloads all 29 — that was ~5.8 MB of
++// JSON in a single chunk. Overriding resources still works: the consumer's
++// virtual:mercur/i18n entry for a language is merged over the locale once it
++// lands, which is the same precedence the eager path had.
++const lazyTranslationBackend: BackendModule = {
++  type: "backend",
++  init: () => {},
++  read: (language: string, _namespace: string, callback: ReadCallback) => {
++    const load = translationLoaders[language];
++
++    if (!load) {
++      // Unknown language, or `en`, which is already bundled. Returning an empty
++      // resource lets i18next fall back rather than hang waiting on a read.
++      callback(null, customTranslationFor(language));
++      return;
++    }
++
++    load()
++      .then((module) => {
++        callback(
++          null,
++          deepMerge(
++            module.default as Record<string, any>,
++            customTranslationFor(language),
++          ),
++        );
++      })
++      .catch((error) => {
++        callback(error as Error, null);
++      });
++  },
++};
++
+ const mergedTranslations = deepMerge(translations, customI18nResources);
+ 
+ export const I18n = () => {
+@@ -45,6 +88,7 @@ export const I18n = () => {
+         lookupLocalStorage: "lng",
+       }),
+     )
++    .use(lazyTranslationBackend)
+     .use(initReactI18next)
+     .init({
+       ...defaultI18nOptions,
+diff --git a/packages/admin/src/i18n/config.ts b/packages/admin/src/i18n/config.ts
+index 966cbfaaf..51ce96079 100644
+--- a/packages/admin/src/i18n/config.ts
++++ b/packages/admin/src/i18n/config.ts
+@@ -1,6 +1,6 @@
+ import { InitOptions } from "i18next"
+ 
+-import translations from "./translations"
++import { eagerTranslations, supportedLanguages } from "./translations"
+ 
+ export const defaultI18nOptions: InitOptions = {
+   debug: process.env.NODE_ENV === "development",
+@@ -14,6 +14,10 @@ export const defaultI18nOptions: InitOptions = {
+   interpolation: {
+     escapeValue: false,
+   },
+-  resources: translations,
+-  supportedLngs: Object.keys(translations),
++  resources: eagerTranslations,
++  // Only `en` is bundled; the rest arrive through the lazy backend. Without
++  // this, i18next treats a language it has partial resources for as fully
++  // loaded and never calls the backend.
++  partialBundledLanguages: true,
++  supportedLngs: supportedLanguages,
+ }
+diff --git a/packages/admin/src/i18n/translations/index.ts b/packages/admin/src/i18n/translations/index.ts
+index 03770d33c..32358a19a 100644
+--- a/packages/admin/src/i18n/translations/index.ts
++++ b/packages/admin/src/i18n/translations/index.ts
+@@ -1,120 +1,57 @@
+-import bg from "./bg.json"
+-import de from "./de.json"
+-import el from "./el.json"
+ import en from "./en.json"
+-import es from "./es.json"
+-import fr from "./fr.json"
+-import he from "./he.json"
+-import hu from "./hu.json"
+-import it from "./it.json"
+-import ja from "./ja.json"
+-import pl from "./pl.json"
+-import ptBR from "./ptBR.json"
+-import th from "./th.json"
+-import tr from "./tr.json"
+-import uk from "./uk.json"
+-import ro from "./ro.json"
+-import mk from "./mk.json"
+-import mn from "./mn.json"
+-import ar from "./ar.json"
+-import zhCN from "./zhCN.json"
+-import fa from "./fa.json"
+-import cs from "./cs.json"
+-import ru from "./ru.json"
+-import lt from "./lt.json"
+-import vi from "./vi.json"
+-import ko from "./ko.json"
+-import nl from "./nl.json"
+-import bs from "./bs.json"
+-import id from "./id.json"
+-const translations: Record<string, { translation: Record<string, unknown> }> = {
+-  bs: {
+-    translation: bs,
+-  },
+-  bg: {
+-    translation: bg,
+-  },
+-  de: {
+-    translation: de,
+-  },
+-  el: {
+-    translation: el,
+-  },
++
++// English is the fallback language, so it must be resolvable synchronously —
++// i18next needs it before the first render. Every other locale is loaded on
++// demand through the backend in components/utilities/i18n/i18n.tsx.
++//
++// Importing all 29 statically put ~5.8 MB of JSON into a single chunk that every
++// user downloaded to read one language. Dynamic import() lets the bundler emit
++// one chunk per locale and fetch only the active one.
++export const eagerTranslations = {
+   en: {
+     translation: en,
+   },
+-  es: {
+-    translation: es,
+-  },
+-  fr: {
+-    translation: fr,
+-  },
+-  he: {
+-    translation: he,
+-  },
+-  hu: {
+-    translation: hu,
+-  },
+-  it: {
+-    translation: it,
+-  },
+-  ja: {
+-    translation: ja,
+-  },
+-  pl: {
+-    translation: pl,
+-  },
+-  ptBR: {
+-    translation: ptBR,
+-  },
+-  th: {
+-    translation: th,
+-  },
+-  tr: {
+-    translation: tr,
+-  },
+-  uk: {
+-    translation: uk,
+-  },
+-  ro: {
+-    translation: ro,
+-  },
+-  mk: {
+-    translation: mk,
+-  },
+-  mn: {
+-    translation: mn,
+-  },
+-  ar: {
+-    translation: ar,
+-  },
+-  zhCN: {
+-    translation: zhCN,
+-  },
+-  fa: {
+-    translation: fa,
+-  },
+-  cs: {
+-    translation: cs,
+-  },
+-  ru: {
+-    translation: ru,
+-  },
+-  lt: {
+-    translation: lt,
+-  },
+-  vi: {
+-    translation: vi,
+-  },
+-  ko: {
+-    translation: ko,
+-  },
+-  nl: {
+-    translation: nl,
+-  },
+-  id: {
+-    translation: id,
+-  },
+ }
+ 
+-export default translations
++export type TranslationResource = typeof en
++
++export const translationLoaders: Record<
++  string,
++  () => Promise<{ default: TranslationResource }>
++> = {
++  ar: () => import("./ar.json"),
++  bg: () => import("./bg.json"),
++  bs: () => import("./bs.json"),
++  cs: () => import("./cs.json"),
++  de: () => import("./de.json"),
++  el: () => import("./el.json"),
++  es: () => import("./es.json"),
++  fa: () => import("./fa.json"),
++  fr: () => import("./fr.json"),
++  he: () => import("./he.json"),
++  hu: () => import("./hu.json"),
++  id: () => import("./id.json"),
++  it: () => import("./it.json"),
++  ja: () => import("./ja.json"),
++  ko: () => import("./ko.json"),
++  lt: () => import("./lt.json"),
++  mk: () => import("./mk.json"),
++  mn: () => import("./mn.json"),
++  nl: () => import("./nl.json"),
++  pl: () => import("./pl.json"),
++  ptBR: () => import("./ptBR.json"),
++  ro: () => import("./ro.json"),
++  ru: () => import("./ru.json"),
++  th: () => import("./th.json"),
++  tr: () => import("./tr.json"),
++  uk: () => import("./uk.json"),
++  vi: () => import("./vi.json"),
++  zhCN: () => import("./zhCN.json"),
++}
++
++export const supportedLanguages = [
++  "en",
++  ...Object.keys(translationLoaders),
++]
++
++export default eagerTranslations
