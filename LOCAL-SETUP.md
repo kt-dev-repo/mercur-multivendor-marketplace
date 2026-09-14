@@ -233,6 +233,24 @@ bun run test:integration:http -- integration-tests/http/seller  # wrong: 0 tests
 Jest prints `haste module naming collision` warnings for `templates/` and
 `apps/storefront/.next/standalone`. Cosmetic; tests still pass.
 
+### Rebuild `packages/core` between a red run and a green run
+
+The HTTP harness resolves `@mercurjs/core` through the package's `exports` to
+`packages/core/.medusa/server`, **not** to `src/`. Applying or reverting an
+overlay changes `src/` only, so a red/green comparison that skips the rebuild
+silently exercises the previous tree's compiled output — which shows up as a
+fully green "pristine" run, the most convincing false green of the four.
+
+```bash
+./deploy/overlays/apply.sh --revert && (cd packages/core && bun run build)  # red
+./deploy/overlays/apply.sh          && (cd packages/core && bun run build)  # green
+```
+
+The same applies to the dev server on `:9000`: it serves `.medusa/server`, so
+applying overlays without rebuilding leaves it running unpatched code. Verify by
+grepping the compiled artefact rather than the source, e.g. `unit_price` must be
+absent from `.medusa/server/src/api/store/carts/[id]/line-items/validators.js`.
+
 ## 8. Publish **[done]**
 
 ```bash
