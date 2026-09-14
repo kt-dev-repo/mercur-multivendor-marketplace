@@ -45,7 +45,20 @@ ENV VITE_MERCUR_BACKEND_URL=$VITE_MERCUR_BACKEND_URL
 # under what that needs, and the build dies with
 # ERR_WORKER_OUT_OF_MEMORY: Worker terminated due to reaching memory limit.
 # Raise the heap for the build stage.
-ENV NODE_OPTIONS=--max-old-space-size=6144
+#
+# NEVER set this above the RAM the host can actually give. A cap larger than
+# available memory is worse than no cap: Node will not fail at its own limit,
+# it keeps allocating until the KERNEL OOM-killer fires — and the kernel picks
+# its victim by score across the whole host, so it may kill Traefik or the
+# Dokploy panel instead of this build. That takes the control plane down with
+# it. Size it to the host and let the build fail cleanly instead.
+#
+#   host RAM   BUILD_HEAP_MB
+#   4 GB       2048   (tight; prefer building in CI)
+#   8 GB       4096
+#   16 GB+     6144
+ARG BUILD_HEAP_MB=4096
+ENV NODE_OPTIONS=--max-old-space-size=${BUILD_HEAP_MB}
 WORKDIR /repo
 
 # Local overlays: fixes to upstream-tracked files that this repo deliberately

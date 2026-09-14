@@ -79,12 +79,62 @@ and the patch must be regenerated rather than forced. See
   | `vendor.example.com` | Vendor dashboard |
   | `admin.example.com` | Admin dashboard |
 
-- **6 GB RAM minimum** on the build host, 8 GB comfortable. This is not padding:
-  `@mercurjs/vendor` emits an ~8 MB ESM chunk and tsup generates its `.d.ts` in a
-  worker thread that dies with `ERR_WORKER_OUT_OF_MEMORY` at the default heap.
-  `Dockerfile.dashboard` sets `NODE_OPTIONS=--max-old-space-size=6144` to survive
-  it; the host still has to have that memory to give.
+- **6 GB RAM minimum** on the build host, 8 GB comfortable — and that is the
+  figure for **one** image at a time. `@mercurjs/vendor` emits an ~8 MB ESM chunk
+  and tsup generates its `.d.ts` in a worker thread that dies with
+  `ERR_WORKER_OUT_OF_MEMORY` at the default heap, so the dashboard build raises
+  the ceiling via `BUILD_HEAP_MB` (default 4096).
+
+  **Set `COMPOSE_PARALLEL_LIMIT=1` before your first deploy.** Compose builds all
+  four services concurrently by default; two monorepo installs, a `next build`
+  and two vite builds at once will exhaust any modest VPS. See §1a.
 - Roughly **8 GB free disk** for the image layers and the bun install cache.
+
+## 1a. Do not let the build kill the server
+
+This stack has taken a Dokploy host down, so treat this as required reading.
+
+**What happens.** All four services carry a `build:` block and Compose builds
+them concurrently. Peak memory is therefore the *sum* of two monorepo installs,
+a `next build` and two vite builds — not the 6 GB figure quoted above for a
+single image. When the host runs out, the Linux OOM-killer chooses its victim by
+score **across the whole machine**, and Traefik and the Dokploy panel are
+candidates. You lose the control plane, not just the deploy.
+
+**Why an over-large heap ceiling makes it worse.** `--max-old-space-size` above
+available RAM is worse than no ceiling at all: Node will not fail at its own
+limit, it keeps allocating until the kernel intervenes — and the kernel may kill
+something else. Size `BUILD_HEAP_MB` to the host so the build fails cleanly.
+
+**How to recognise it.** A host in this state still answers ping and still
+completes TCP handshakes on 80/443/3000, but never returns a byte:
+
+```bash
+ping -c3 <host>                 # replies
+nc -z <host> 443                # succeeds
+curl -m 30 http://<host>:3000/  # connects in ms, then zero bytes until timeout
+```
+
+Kernel alive, userspace wedged. SSH is usually unreachable too, so recover from
+the provider's web console or serial console, or hard-reboot from the panel.
+
+**Prevention, in order of effectiveness:**
+
+1. **Build one image at a time** — set `COMPOSE_PARALLEL_LIMIT=1` in the Dokploy
+   service Environment. Single biggest win, costs only build time.
+2. **Size `BUILD_HEAP_MB` to the host** — 2048 at 4 GB, 4096 at 8 GB, 6144 at
+   16 GB+.
+3. **Keep the `mem_limit` values** in the compose file. They bound the running
+   containers so a leak kills one container rather than the host.
+4. **Add swap** as a safety net — it turns a hard OOM into slowness:
+   ```bash
+   sudo fallocate -l 4G /swapfile && sudo chmod 600 /swapfile
+   sudo mkswap /swapfile && sudo swapon /swapfile
+   echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+   ```
+5. **On anything under 8 GB, do not build on the server at all.** Build in CI,
+   push to a registry, and have Dokploy deploy the tag. Replace each `build:`
+   block with `image: your-registry/mercur-<service>:<tag>`.
 
 ## 1b. Architecture: what talks to what
 
@@ -344,13 +394,14 @@ drops in-flight workflow state. Appendonly persistence is on.
 | `getaddrinfo ENOTFOUND <host>` | Wrong internal hostname, or the database service is in a different Dokploy project. |
 | API restarts in a loop right after deploy | Databases still starting. Raise `WAIT_TIMEOUT`. |
 | Migrations hang, then `Could not connect to the database while running migrations` | Medusa's pre-migration probe timed out. Raise `MEDUSA_DB_MIGRATION_CONNECTION_TIMEOUT` (ms, default 10000). See the note below — it can fire even when the database is reachable. |
-| Build OOM-killed | Under 4 GB RAM. Increase the build host, or build images in CI and deploy by tag. |
+| Build OOM-killed | Concurrent builds, or under 4 GB RAM. Set `COMPOSE_PARALLEL_LIMIT=1` and lower `BUILD_HEAP_MB`; on a small host build in CI and deploy by tag. |
 | Uploaded images 404 (local provider) | `FILE_BACKEND_URL` must be `${API_PUBLIC_URL}/static`. |
 | S3 uploads fail with `AccessDenied` on the ACL | set `S3_ACL=false` (BucketOwnerEnforced / R2). |
 | S3 uploads fail with a DNS or signature error | non-AWS service needs `S3_ENDPOINT`, and usually `S3_FORCE_PATH_STYLE=true`. |
 | Images still resolve to `/static` after setting S3 | `S3_BUCKET` empty or not reaching the container; check the api service env. |
 | Seed data duplicated | `RUN_SEED` left `true`. Set false and redeploy. |
-| `ERR_WORKER_OUT_OF_MEMORY` during build | Build host under 6 GB RAM. |
+| `ERR_WORKER_OUT_OF_MEMORY` during build | `BUILD_HEAP_MB` too low for the dashboard build. Raise it — but never above host RAM. |
+| **Dokploy panel itself goes down during a deploy** | Host OOM: the kernel killed Traefik or the panel instead of the build. Tell-tale signs are a host that still answers ping and still completes TCP handshakes on 80/443/3000 while returning zero bytes. Recover from the provider console (SSH is usually unreachable too), then set `COMPOSE_PARALLEL_LIMIT=1`, lower `BUILD_HEAP_MB`, and add swap. See §1a. |
 | `Parsing error: The keyword 'export' is reserved` | Root `eslint.config.mts` missing from the build context. |
 | ``` `column` must be greater than or equal to 0 ``` | Something is running medusa under bun instead of Node. |
 | `File /app/src/scripts/seed.ts doesn't exist` | Use the compiled `seed.js` path; the entrypoint handles this. |

@@ -15,11 +15,38 @@
 # Read deploy/dokploy/README.md before the first deploy — the storefront and
 # dashboards bake their public URLs in at BUILD time, so the order of operations
 # matters.
+#
+# MEMORY — this stack is the hungriest of the two. Read before deploying.
+#
+# Four services build CONCURRENTLY by default under `docker compose up --build`
+# (two monorepo installs, a next build and two vite builds), and here Postgres
+# and Redis are competing for the same RAM. When the kernel OOM-killer fires it
+# picks its victim by score across the whole host, so it may reap Traefik or the
+# Dokploy panel instead of the build — taking the control plane down rather than
+# just failing the deploy.
+#
+# Build ONE AT A TIME on any host under ~16 GB:
+#
+#   COMPOSE_PARALLEL_LIMIT=1 docker compose -f docker-compose.dokploy-bundled.yml build
+#   docker compose -f docker-compose.dokploy-bundled.yml up -d
+#
+# In Dokploy, set COMPOSE_PARALLEL_LIMIT=1 in the service Environment.
+#
+# BUILD_HEAP_MB caps the dashboard build heap and MUST stay below host RAM — a
+# cap above available memory is worse than none, because Node then grows until
+# the kernel kills something rather than failing on its own limit. The mem_limit
+# on each service bounds the RUNTIME. The defaults below are deliberately
+# conservative and assume roughly 8 GB; raise them only to what the box has.
+#
+# Under 8 GB, build images in CI and deploy by tag instead.
 
 services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    # Postgres will happily use everything you give it. Bounding it keeps the
+    # database from being the reason the host runs out during a build.
+    mem_limit: ${POSTGRES_MEM_LIMIT:-1g}
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -36,6 +63,7 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    mem_limit: ${REDIS_MEM_LIMIT:-512m}
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redisdata:/data
@@ -50,6 +78,7 @@ services:
       context: .
       dockerfile: deploy/dokploy/Dockerfile.api
     restart: unless-stopped
+    mem_limit: ${API_MEM_LIMIT:-2g}
     depends_on:
       postgres: { condition: service_healthy }
       redis:    { condition: service_healthy }
@@ -113,6 +142,7 @@ services:
         NEXT_PUBLIC_VENDOR_URL: ${VENDOR_PUBLIC_URL}
         REVALIDATE_SECRET: ${REVALIDATE_SECRET}
     restart: unless-stopped
+    mem_limit: ${STOREFRONT_MEM_LIMIT:-1g}
     depends_on:
       api: { condition: service_started }
     environment:
@@ -128,7 +158,9 @@ services:
       args:
         APP: vendor
         VITE_MERCUR_BACKEND_URL: ${API_PUBLIC_URL}
+        BUILD_HEAP_MB: ${BUILD_HEAP_MB:-4096}
     restart: unless-stopped
+    mem_limit: ${DASHBOARD_MEM_LIMIT:-256m}
     expose:
       - "80"
 
@@ -139,7 +171,9 @@ services:
       args:
         APP: admin-test
         VITE_MERCUR_BACKEND_URL: ${API_PUBLIC_URL}
+        BUILD_HEAP_MB: ${BUILD_HEAP_MB:-4096}
     restart: unless-stopped
+    mem_limit: ${DASHBOARD_MEM_LIMIT:-256m}
     expose:
       - "80"
 
