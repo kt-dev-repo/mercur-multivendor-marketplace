@@ -65,8 +65,23 @@ ENV MEDUSA_BACKEND_URL=$MEDUSA_BACKEND_URL \
     REVALIDATE_SECRET=$REVALIDATE_SECRET \
     NEXT_TELEMETRY_DISABLED=1
 # The storefront imports @mercurjs/client and @mercurjs/types as workspace packages.
-RUN bun run build --filter=@mercurjs/types --filter=@mercurjs/client
-RUN bun run build --filter=@mercurjs/storefront
+# Build parallelism. On a small host this matters more than memory: turbo.json
+# sets concurrency 20, esbuild's Go runtime and SWC's rayon pool each size
+# themselves to the core count, so ONE image build can still saturate every vCPU
+# and starve Traefik and the Dokploy panel — which is how a deploy takes the
+# control plane down even with COMPOSE_PARALLEL_LIMIT=1.
+#
+# Leave at least one core for the rest of the machine:
+#   vCPUs   BUILD_JOBS
+#   2       1
+#   3-4     2
+#   8+      cores - 2
+ARG BUILD_JOBS=2
+ENV GOMAXPROCS=${BUILD_JOBS}
+ENV RAYON_NUM_THREADS=${BUILD_JOBS}
+
+RUN bun run build --concurrency=${BUILD_JOBS} --filter=@mercurjs/types --filter=@mercurjs/client
+RUN bun run build --concurrency=${BUILD_JOBS} --filter=@mercurjs/storefront
 
 FROM base AS runtime
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000 HOSTNAME=0.0.0.0

@@ -130,22 +130,27 @@ the provider's web console or serial console, or hard-reboot from the panel.
 **Prevention, in order of effectiveness:**
 
 1. **Build one image at a time** — set `COMPOSE_PARALLEL_LIMIT=1` in the Dokploy
-   service Environment. Single biggest win by a wide margin: it fixes the CPU
-   and I/O contention as well as the memory spike, and costs only build time.
-2. **Size `BUILD_HEAP_MB` to the host** — 2048 at 4 GB, 4096 at 8 GB, 6144 at
+   service Environment. Necessary, and it costs only build time.
+2. **Cap the parallelism inside each build** — set `BUILD_JOBS` to leave at least
+   one core free (1 on 2 vCPUs, 2 on 3-4, `cores - 2` above that). **This is the
+   step people miss, and on a small host step 1 alone will not save you:**
+   `turbo.json` sets concurrency 20, and esbuild's Go runtime and SWC's rayon
+   pool each size themselves to the core count, so a *single* image build can
+   still peg every vCPU and starve Traefik and the panel.
+3. **Size `BUILD_HEAP_MB` to the host** — 2048 at 4 GB, 4096 at 8 GB, 6144 at
    16 GB+ (the default).
-3. **Keep the `mem_limit` values** in the compose file, but do not set them too
+4. **Keep the `mem_limit` values** in the compose file, but do not set them too
    low. They bound the running containers so a leak kills one container rather
    than the host — yet an `api` capped under ~3 GB can be OOM-killed by Docker
    during migrations or seeding, which presents as an unexplained crash-loop.
    The defaults suit a 16-20 GB host; halve them for 8 GB.
-4. **Add swap** as a safety net — it turns a hard OOM into slowness:
+5. **Add swap** as a safety net — it turns a hard OOM into slowness:
    ```bash
    sudo fallocate -l 4G /swapfile && sudo chmod 600 /swapfile
    sudo mkswap /swapfile && sudo swapon /swapfile
    echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
    ```
-5. **On anything under 8 GB, do not build on the server at all.** Build in CI,
+6. **On 3 vCPUs or fewer, or under 8 GB, do not build on the server at all.** Build in CI,
    push to a registry, and have Dokploy deploy the tag. Replace each `build:`
    block with `image: your-registry/mercur-<service>:<tag>`.
 
