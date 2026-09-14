@@ -3,17 +3,17 @@
 Remediation plan from the static audit of **2026-09-10** against upstream base
 `a925daf62` (v2.3.4-canary.6).
 
-> **Status 2026-09-14 — 13 overlays, all `pending`, applying together cleanly.**
+> **Status 2026-09-15 — 14 overlays, all `pending`, applying together cleanly.**
 >
 > | | |
 > |---|---|
 > | `001`-`004` | local fixes (storefront 404s, `test:unit`, doc ports, S3) |
 > | `005`-`009` | security cycle 1 — see `fix-cycle/CYCLE-1-CLOSURE.md` |
 > | `010`-`013` | performance/correctness — see §P6 |
+> | `014` | completes P0.3 — vendor product sub-route scoping |
 >
-> P0.1, P0.2, P0.4, P0.5 **fixed** and verified live. **P0.3 only partially
-> fixed** — still exploitable through four sub-route matchers, and the
-> highest-priority carry-over. Those sections are compacted to their outcome;
+> All of P0.1-P0.5 are now **fixed** and verified live against the running stack
+> with `rbac=false`. Those sections are compacted to their outcome;
 > full analysis is in git history at `21a6633d1`. Everything else below is
 > untouched and still open.
 >
@@ -102,17 +102,22 @@ undefined. Fixed in the workflow **and** in `OrderGroupRepository`, which
 silently dropped the `cart_id` filter. Live: repeat complete 409, 5 concurrent
 completes return one shared group.
 
-### P0.3 — Vendor A modifies vendor B's product — **PARTIALLY FIXED, overlay `009`. STILL OPEN.**
+### P0.3 — Vendor A modifies vendor B's product — **FIXED, overlays `009` + `014`**
 
-GET/POST/DELETE/cancel on `/vendor/products/:id` now run an always-on ownership
-middleware (404, never 403) that does **not** share RBAC's kill switch.
+`009` put an always-on ownership middleware (404, never 403) on
+GET/POST/DELETE/cancel for `/vendor/products/:id`, independent of the `rbac`
+kill switch. `014` closes the four sub-route matchers it left open —
+`variants` (GET/POST), `variants/:variant_id` (GET/POST/DELETE, which had
+`middlewares: []`) and `attributes/batch`.
 
-**Not covered — still exploitable:** `variants/route.ts:38`,
-`variants/[variant_id]/route.ts:43,79`, `attributes/batch/route.ts:15` use
-`seller_id` only as `created_by`. Reproduced live: seller B queued a
-`VARIANT_ADD` change on seller A's product. Lands `pending` by default, but
-`MEDUSA_FF_PRODUCT_REQUEST=false` makes `auto-confirm-product-change.ts:30`
-confirm it immediately. **Carry into the next cycle.**
+**The sub-routes take a VISIBILITY gate, not ownership**, and that distinction
+matters: an existing upstream test — *"allows any seller to request changes on a
+master product it did not create"* — encodes the product decision that the shared
+catalogue is editable by any seller **through the review pipeline**. All these
+routes stage a reviewable `ProductChange`. Requiring ownership breaks the
+master-product model; visibility still 404s another seller's draft, which was the
+actual leak. Live with rbac off: B → A's draft 404 ×3, B → published master
+GET 200 / batch 202, A unaffected. `http/product` 147 passed.
 
 ### P0.4 — All inventory items belong to one seller — **FIXED, overlay `008` + data repair**
 
@@ -453,12 +458,7 @@ See `deploy/dokploy/README.md` §1a.
 
 ## Remaining backlog, in order
 
-1. **P0.3 — finish it.** Four matchers still assert no ownership:
-   `variants/route.ts:38`, `variants/[variant_id]/route.ts:43,79`,
-   `attributes/batch/route.ts:15`. Reproduced live. Bounded today because
-   `product_request` defaults `true`, but `MEDUSA_FF_PRODUCT_REQUEST=false` makes
-   `auto-confirm-product-change.ts:30` land the write immediately.
-2. **`OrderGroupRepository.findAndCount` drops unknown filters** — returns the
+1. **`OrderGroupRepository.findAndCount` drops unknown filters** — returns the
    whole table for any key outside its allow-list. `006` fixed only `cart_id`.
    Same class as P0.5.
 3. **Verify `010`-`012` in a browser.** No non-English locale has been loaded

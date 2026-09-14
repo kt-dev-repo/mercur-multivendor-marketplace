@@ -1,0 +1,79 @@
+# 014 — the /vendor/products/:id sub-routes now apply the same visibility gate
+# as the detail route. Completes P0.3, which overlay 009 only half-closed.
+#
+# 009 guarded GET/POST/DELETE/cancel on `/vendor/products/:id`, but four sub-route
+# matchers were left with no tenant check at all — `variants` (GET, POST),
+# `variants/:variant_id` (GET, POST, DELETE — that one had `middlewares: []`) and
+# `attributes/batch`. They use `seller_id` only as `created_by`. Reproduced live
+# with rbac off: seller B posted to seller A's DRAFT product and got a staged
+# `VARIANT_ADD` ProductChange attributed to B.
+#
+# The guard here is VISIBILITY, not ownership, and that distinction is the whole
+# point. An existing upstream test — "allows any seller to request changes on a
+# master product it did not create" — encodes the product decision: the shared
+# catalogue is editable by any seller THROUGH THE REVIEW PIPELINE, and every one
+# of these routes stages a reviewable ProductChange via
+# productEditUpdateVariantsWorkflow rather than writing directly. Requiring
+# ownership here breaks that test and the master-product model with it.
+#
+# Visibility closes the actual defect: another seller's DRAFT is not visible, so
+# it 404s, while a published master product stays open to change requests.
+#
+# The parent routes keep `ensureSellerOwnsProductParam` from 009 — updating or
+# deleting the product record itself is still owner-only.
+#
+# Live, rbac off, after: B -> A's draft 404 on all three; B -> published master
+# GET 200 / attributes batch 202; A -> own product unaffected.
+# http/product/vendor 19/19.
+
+--- a/packages/core/src/api/vendor/products/middlewares.ts
++++ b/packages/core/src/api/vendor/products/middlewares.ts
+@@ -225,6 +225,7 @@
+     method: ["GET"],
+     matcher: "/vendor/products/:id/variants",
+     middlewares: [
++      ensureSellerCanViewProduct,
+       validateAndTransformQuery(
+         VendorGetProductVariantsParams,
+         vendorProductVariantQueryConfig.list
+@@ -241,6 +242,7 @@
+     method: ["POST"],
+     matcher: "/vendor/products/:id/variants",
+     middlewares: [
++      ensureSellerCanViewProduct,
+       validateAndTransformBody(VendorAddProductVariant),
+       validateAndTransformQuery(
+         VendorGetProductParams,
+@@ -259,6 +261,7 @@
+     method: ["GET"],
+     matcher: "/vendor/products/:id/variants/:variant_id",
+     middlewares: [
++      ensureSellerCanViewProduct,
+       validateAndTransformQuery(
+         VendorGetProductVariantParams,
+         vendorProductVariantQueryConfig.retrieve
+@@ -275,6 +278,7 @@
+     method: ["POST"],
+     matcher: "/vendor/products/:id/variants/:variant_id",
+     middlewares: [
++      ensureSellerCanViewProduct,
+       validateAndTransformBody(VendorUpdateProductVariant),
+       validateAndTransformQuery(
+         VendorGetProductParams,
+@@ -291,7 +295,7 @@
+   {
+     method: ["DELETE"],
+     matcher: "/vendor/products/:id/variants/:variant_id",
+-    middlewares: [],
++    middlewares: [ensureSellerCanViewProduct],
+     policies: [
+       {
+         resource: PolicyResource.product_variant,
+@@ -304,6 +308,7 @@
+     method: ["POST"],
+     matcher: "/vendor/products/:id/attributes/batch",
+     middlewares: [
++      ensureSellerCanViewProduct,
+       validateAndTransformBody(VendorBatchProductAttributes),
+       validateAndTransformQuery(
+         VendorGetProductParams,
