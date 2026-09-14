@@ -147,8 +147,8 @@ services:
     build:
       context: .
       dockerfile: deploy/dokploy/Dockerfile.dashboard
+      target: vendor
       args:
-        APP: vendor
         VITE_MERCUR_BACKEND_URL: ${API_PUBLIC_URL}
         BUILD_HEAP_MB: ${BUILD_HEAP_MB:-6144}
         BUILD_JOBS: ${BUILD_JOBS:-2}
@@ -164,8 +164,8 @@ services:
     build:
       context: .
       dockerfile: deploy/dokploy/Dockerfile.dashboard
+      target: admin
       args:
-        APP: admin-test
         VITE_MERCUR_BACKEND_URL: ${API_PUBLIC_URL}
         BUILD_HEAP_MB: ${BUILD_HEAP_MB:-6144}
         BUILD_JOBS: ${BUILD_JOBS:-2}

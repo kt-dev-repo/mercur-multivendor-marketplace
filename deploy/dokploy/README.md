@@ -1,7 +1,16 @@
 # Deploying Mercur on Dokploy
 
-Deploys the whole marketplace as one Dokploy **Compose** service: Postgres,
-Redis, the Medusa API, the Next.js storefront, and the vendor + admin dashboards.
+**Three ways to deploy. Pick by what your server can take.**
+
+| | Method | When |
+|---|---|---|
+| **1** | **Build in CI, deploy prebuilt images** — §1a, `docker-compose.dokploy.registry.yml` | Best. The server compiles nothing. |
+| **2** | **Four separate Dokploy Applications** — [`DEPLOY-SEPARATE-APPS.md`](./DEPLOY-SEPARATE-APPS.md) | Building on a small host. You control when each service builds. |
+| **3** | One Compose service that builds everything — the rest of this file | Only on a big build host. **This is what took a 3-vCPU box down.** |
+
+Method 3 deploys the whole marketplace as one Dokploy **Compose** service:
+Postgres, Redis, the Medusa API, the Next.js storefront, and the vendor + admin
+dashboards.
 
 Every file here is additive. No upstream file is modified, so `git merge upstream/main`
 stays conflict-free.
@@ -468,8 +477,8 @@ written:
 | `Dockerfile.storefront` builds | yes, Next standalone |
 | Storefront container against the API container | `/de` 200, **4 product cards rendered**, no error overlay |
 | Build args baked in | page title reflected `NEXT_PUBLIC_SITE_NAME` |
-| `Dockerfile.dashboard` builds (`APP=vendor`) | yes |
-| `Dockerfile.dashboard` builds (`APP=admin-test`) | yes; distinct bundle from vendor (different asset hashes) |
+| `Dockerfile.dashboard` builds (`--target vendor`) | yes |
+| `Dockerfile.dashboard` builds (`--target admin`) | yes; distinct bundle from vendor (different asset hashes) |
 | Dashboard serves a missing asset | 404, not an index.html fallback |
 | Overlays applied in every image build | 001 + 002 + 004 applied, 003 correctly skipped |
 | S3 provider switch (overlay 004) against MinIO | upload → object in bucket → fetched back byte-identical; unsetting `S3_BUCKET` reverts to local |

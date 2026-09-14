@@ -53,10 +53,10 @@ jobs:
             dockerfile: deploy/dokploy/Dockerfile.storefront
           - name: admin
             dockerfile: deploy/dokploy/Dockerfile.dashboard
-            app: admin-test
+            target: admin
           - name: vendor
             dockerfile: deploy/dokploy/Dockerfile.dashboard
-            app: vendor
+            target: vendor
 
     steps:
       - uses: actions/checkout@v4
@@ -82,6 +82,7 @@ jobs:
         with:
           context: .
           file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -90,7 +91,6 @@ jobs:
           # default. The storefront's public URLs are baked in at BUILD time, so
           # they must be set as repository variables, not at deploy time.
           build-args: |
-            APP=${{ matrix.app }}
             BUILD_HEAP_MB=6144
             BUILD_JOBS=4
             MEDUSA_BACKEND_URL=${{ vars.API_PUBLIC_URL }}
