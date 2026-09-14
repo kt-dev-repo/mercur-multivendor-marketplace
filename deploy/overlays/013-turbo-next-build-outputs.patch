@@ -1,0 +1,35 @@
+# 013 — turbo could not cache the storefront build, so every deploy rebuilt it.
+#
+# The shared `build` task declares outputs ["dist/**", ".medusa/**"], which is
+# right for the tsup packages and the Medusa server but misses Next.js, which
+# writes to .next/**. Turbo therefore logged
+#
+#   WARNING  no output files found for task @mercurjs/storefront#build
+#
+# and cached an EMPTY output set: a cache hit restored nothing, so `next build`
+# effectively could never be reused. On the 3-vCPU Dokploy host that is minutes
+# added to every deploy, on the slowest stage.
+#
+# Adding ".next/**" makes the task cacheable. The existing "!**/cache/**"
+# negation already excludes .next/cache, which is what Next's own guidance wants
+# kept out of a shared cache.
+#
+# Verified after the change: cold build 25s -> warm build 591ms (FULL TURBO),
+# and all three paths the storefront image copies survive a cache restore --
+# .next/standalone (112M), .next/static (2.3M) and public/ (29M). That last
+# check is the one that matters: a cache hit that restored .next but dropped
+# standalone would produce an image with no server in it.
+
+diff --git a/turbo.json b/turbo.json
+index a0818d3d2..3163340e7 100644
+--- a/turbo.json
++++ b/turbo.json
+@@ -6,7 +6,7 @@
+     "build": {
+       "dependsOn": ["^build"],
+       "inputs": ["$TURBO_DEFAULT$", ".env*"],
+-      "outputs": ["dist/**", ".medusa/**", "!**/cache/**"]
++      "outputs": ["dist/**", ".medusa/**", ".next/**", "!**/cache/**"]
+     },
+     "lint": {
+       "dependsOn": ["^lint"]
