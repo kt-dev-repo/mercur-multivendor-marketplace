@@ -124,7 +124,11 @@ HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=5 \
 #
 # Being last and depending on nothing, this fails in about a second, before any
 # of the expensive build stages run.
-FROM alpine:3.20 AS _select_a_stage
+#
+# The name must start with a letter and contain only [a-zA-Z0-9-_.]: BuildKit
+# rejects a leading underscore ("invalid name for build stage"), while
+# podman/buildah accepts it — so a name that builds locally can still fail CI.
+FROM alpine:3.20 AS select-a-build-stage
 RUN echo >&2 "" \
  && echo >&2 "This Dockerfile has no default stage. Pick one:" \
  && echo >&2 "  Dokploy  -> set the Application's 'Docker Build Stage' to admin or vendor" \
