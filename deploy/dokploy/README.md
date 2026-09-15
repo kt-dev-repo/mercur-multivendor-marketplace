@@ -518,6 +518,8 @@ Covers the two-target dashboard split and the compose/CI changes that followed i
 | Building `Dockerfile.dashboard` with **no** target (before the guard) | exit 0, silently produced a byte-identical **vendor** image |
 | Same build after adding the guard stage | fails in **4 s** with "This Dockerfile has no default stage" |
 | `--target admin` / `--target vendor` still build with the guard present | yes, 13 s / 14 s; admin serves `Mercur Admin`, deep route 200 |
+| All four images build in CI with the guard present | green in 39 s (`Build deployment images`, run 34976646817) |
+| Storefront `NEXT_PUBLIC_TALKJS_APP_ID` build arg | value found in both the server and client chunks |
 
 
 ## A note on the migration connection probe

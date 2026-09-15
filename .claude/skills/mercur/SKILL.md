@@ -130,6 +130,10 @@ cd apps/vendor     && bun run dev                                       # :7002 
 
 18. **Turbo builds `@mercurjs/core` for any dashboard build.** `@mercurjs/core` is a devDependency of `@mercurjs/dashboard-shared`, and turbo's `build` task is `dependsOn: ["^build"]` over all workspace deps. So `--filter=@mercurjs/dashboard-shared` pulls in `core` and `cli` — 6 tasks, not 4. It is cheap in practice (~18 s for all six) because `dashboard-shared` needs core's declarations for its own `dts: true`; do not "optimise" it away without checking that.
 
+19. **podman/buildah accepts Dockerfiles that BuildKit rejects.** A build stage named `_select_a_stage` built fine under podman and failed every CI image build with `invalid name for build stage: name can't start with a number or contain symbols`. Stage names must start with a letter or digit and contain only `[a-zA-Z0-9-_.]`. A local podman build is **not** proof the image builds in CI — CI uses `docker/build-push-action`, i.e. BuildKit.
+
+20. **`Dockerfile.dashboard` has no default stage, on purpose.** Building it without `--target` used to exit 0 and silently produce the **vendor** dashboard, because that was the last stage — so a Dokploy Application named `mercur-admin` with an empty Build Stage field served the vendor panel on the admin domain. It now ends in a `select-a-build-stage` guard that fails in ~1s. Always pass `--target admin` or `--target vendor`.
+
 ## Repo Working Rules (from CLAUDE.md — these are enforced)
 
 - `bun` only. Never npm/yarn/pnpm.
