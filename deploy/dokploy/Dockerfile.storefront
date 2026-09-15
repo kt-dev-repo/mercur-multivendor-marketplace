@@ -53,6 +53,10 @@ ARG NEXT_PUBLIC_STRIPE_KEY
 ARG NEXT_PUBLIC_SITE_NAME="Mercur Marketplace"
 ARG NEXT_PUBLIC_SITE_DESCRIPTION="Mercur Marketplace"
 ARG NEXT_PUBLIC_VENDOR_URL
+# Optional. Enables the vendor<->customer chat (TalkJS). The storefront reads it
+# in three components and falls back to "", so leaving it empty just keeps chat
+# off. Without this ARG it could not be set in a production image at all.
+ARG NEXT_PUBLIC_TALKJS_APP_ID
 ARG REVALIDATE_SECRET
 ENV MEDUSA_BACKEND_URL=$MEDUSA_BACKEND_URL \
     NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY=$NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY \
@@ -62,6 +66,7 @@ ENV MEDUSA_BACKEND_URL=$MEDUSA_BACKEND_URL \
     NEXT_PUBLIC_SITE_NAME=$NEXT_PUBLIC_SITE_NAME \
     NEXT_PUBLIC_SITE_DESCRIPTION=$NEXT_PUBLIC_SITE_DESCRIPTION \
     NEXT_PUBLIC_VENDOR_URL=$NEXT_PUBLIC_VENDOR_URL \
+    NEXT_PUBLIC_TALKJS_APP_ID=$NEXT_PUBLIC_TALKJS_APP_ID \
     REVALIDATE_SECRET=$REVALIDATE_SECRET \
     NEXT_TELEMETRY_DISABLED=1
 # The storefront imports @mercurjs/client and @mercurjs/types as workspace packages.

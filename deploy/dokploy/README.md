@@ -8,6 +8,13 @@
 | **2** | **Four separate Dokploy Applications** — [`DEPLOY-SEPARATE-APPS.md`](./DEPLOY-SEPARATE-APPS.md) | Building on a small host. You control when each service builds. |
 | **3** | One Compose service that builds everything — the rest of this file | Only on a big build host. **This is what took a 3-vCPU box down.** |
 
+**Environment files.** Method 2 gives each Application its own Environment tab,
+so it uses one file per app in [`env/`](./env/) — start at
+[`env/README.md`](./env/README.md). Methods 1 and 3 are a single Compose service
+and use [`.env.example`](./.env.example) (method 1 additionally needs
+`IMAGE_REPO`/`IMAGE_TAG`, and moves the build-time values to GitHub repository
+*variables*).
+
 Method 3 deploys the whole marketplace as one Dokploy **Compose** service:
 Postgres, Redis, the Medusa API, the Next.js storefront, and the vendor + admin
 dashboards.
@@ -459,6 +466,7 @@ drops in-flight workflow state. Appendonly persistence is on.
 | `Parsing error: The keyword 'export' is reserved` | Root `eslint.config.mts` missing from the build context. |
 | ``` `column` must be greater than or equal to 0 ``` | Something is running medusa under bun instead of Node. |
 | Dashboard container shows no health status under **podman** | Expected. `podman build` defaults to the OCI image format, which has no `HEALTHCHECK` field, so the one in `Dockerfile.dashboard` is silently dropped. Build with `--format docker` if you want it locally. Docker/Dokploy keep it. |
+| Dashboard build fails with "This Dockerfile has no default stage" | Working as intended. Set the Application's **Docker Build Stage** to `admin` or `vendor` (or pass `--target`). Without it the build would otherwise produce the vendor dashboard silently, whatever you named the app. |
 | `File /app/src/scripts/seed.ts doesn't exist` | Use the compiled `seed.js` path; the entrypoint handles this. |
 
 ## What was verified before shipping these files
@@ -507,6 +515,9 @@ Covers the two-target dashboard split and the compose/CI changes that followed i
 | API entrypoint dependency wait | `postgres reachable` / `redis reachable`, then migrations start |
 | API full migration on this host | **blocked** — see "A note on the migration connection probe"; podman/macOS only |
 | Image-level `HEALTHCHECK` under podman | dropped by the default OCI format; present with `--format docker` |
+| Building `Dockerfile.dashboard` with **no** target (before the guard) | exit 0, silently produced a byte-identical **vendor** image |
+| Same build after adding the guard stage | fails in **4 s** with "This Dockerfile has no default stage" |
+| `--target admin` / `--target vendor` still build with the guard present | yes, 13 s / 14 s; admin serves `Mercur Admin`, deep route 200 |
 
 
 ## A note on the migration connection probe

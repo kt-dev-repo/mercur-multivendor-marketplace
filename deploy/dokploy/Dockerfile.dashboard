@@ -113,3 +113,22 @@ COPY deploy/dokploy/nginx-spa.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=5 \
   CMD wget -qO- http://127.0.0.1/ >/dev/null 2>&1 || exit 1
+
+# Guard. MUST stay the last stage in this file.
+#
+# Without it, a build with no target silently produces whichever runtime stage
+# happens to be last — so an `admin` Application with the Build Stage field left
+# empty would deploy the VENDOR dashboard to the admin domain and look fine.
+# Verified: building this Dockerfile with no --target exited 0 and produced a
+# byte-identical copy of the vendor image.
+#
+# Being last and depending on nothing, this fails in about a second, before any
+# of the expensive build stages run.
+FROM alpine:3.20 AS _select_a_stage
+RUN echo >&2 "" \
+ && echo >&2 "This Dockerfile has no default stage. Pick one:" \
+ && echo >&2 "  Dokploy  -> set the Application's 'Docker Build Stage' to admin or vendor" \
+ && echo >&2 "  CLI      -> docker build --target admin  -f deploy/dokploy/Dockerfile.dashboard ." \
+ && echo >&2 "              docker build --target vendor -f deploy/dokploy/Dockerfile.dashboard ." \
+ && echo >&2 "" \
+ && exit 1

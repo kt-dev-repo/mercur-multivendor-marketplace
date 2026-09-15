@@ -58,6 +58,15 @@ The two dashboards share one Dockerfile and differ only by **Build Stage**.
 Targeting a stage builds only that chain, so the admin image never compiles the
 vendor package. Nothing is duplicated and nothing is wasted.
 
+> **Build Stage is not optional for the dashboards.** A Dockerfile with no target
+> builds whichever stage is last, so leaving the field empty used to produce the
+> **vendor** dashboard silently — including for the app you called `mercur-admin`,
+> which would then serve the vendor panel on your admin domain and look perfectly
+> healthy. `Dockerfile.dashboard` now ends in a guard stage that fails the build in
+> about a second with a message telling you to pick one, so this is a loud error
+> instead of a silent wrong deploy. If you see *"This Dockerfile has no default
+> stage"*, set the field.
+
 Enable Let's Encrypt on all four domains.
 
 ---
@@ -105,57 +114,31 @@ trailing slash.
 
 ## 4. Environment per Application
 
-Start from `deploy/dokploy/.env.example` and set only what each app needs.
+Each Application has its own **Environment** tab, so there is one env file per
+app rather than one shared blob. Paste the matching file and fill it in:
 
-### `mercur-api` (runtime)
+| App | Paste this | Build-time or runtime |
+|---|---|---|
+| `mercur-api` | [`env/api.env.example`](env/api.env.example) | runtime, except `BUILD_JOBS` |
+| `mercur-storefront` | [`env/storefront.env.example`](env/storefront.env.example) | **every `NEXT_PUBLIC_*` is build-time** |
+| `mercur-admin` | [`env/admin.env.example`](env/admin.env.example) | **all build-time** |
+| `mercur-vendor` | [`env/vendor.env.example`](env/vendor.env.example) | **all build-time** |
 
-```
-DATABASE_URL=postgres://user:pass@<internal-postgres-host>:5432/mercur
-REDIS_URL=redis://<internal-redis-host>:6379
-JWT_SECRET=...
-COOKIE_SECRET=...
-STORE_CORS=https://shop.example.com
-ADMIN_CORS=https://admin.example.com
-VENDOR_CORS=https://vendor.example.com
-AUTH_CORS=https://shop.example.com,https://admin.example.com,https://vendor.example.com
-MERCUR_VENDOR_URL=https://vendor.example.com
-STOREFRONT_REVALIDATE_URL=https://shop.example.com
-STOREFRONT_REVALIDATE_SECRET=...
-FILE_BACKEND_URL=https://api.example.com/static
-ADMIN_EMAIL=...
-ADMIN_PASSWORD=...
-RUN_SEED=false          # true ONLY on a brand-new database, then back to false
-WAIT_TIMEOUT=120
-MEDUSA_DB_MIGRATION_CONNECTION_TIMEOUT=30000
-BUILD_JOBS=2            # build-time
-BUILD_HEAP_MB=6144      # build-time
-```
+(`deploy/dokploy/.env.example` is the *Compose* variant — one env blob for a
+single stack. Do not use it here; it mixes values from all four apps.)
 
-Add a **persistent volume** `/app/static` if you use the local file provider.
-Without it, uploads vanish on every redeploy. Not needed once `S3_BUCKET` is set.
+Two things to get right, because both fail silently:
 
-### `mercur-storefront` (build-time — rebuild to change)
+- **Build-time values must be set before you build.** `VITE_MERCUR_BACKEND_URL`
+  and every `NEXT_PUBLIC_*` are compiled into the JavaScript. Setting them in the
+  Environment tab and pressing Restart does nothing — use **Redeploy (rebuild)**.
+- **`BUILD_HEAP_MB` only exists for the two dashboards.** `Dockerfile.api` and
+  `Dockerfile.storefront` declare no such build arg, so setting it on those apps
+  has no effect. `BUILD_JOBS` applies to all four.
 
-```
-MEDUSA_BACKEND_URL=https://api.example.com
-NEXT_PUBLIC_BASE_URL=https://shop.example.com
-NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY=pk_...    # exists only after seeding
-NEXT_PUBLIC_DEFAULT_REGION=de
-NEXT_PUBLIC_VENDOR_URL=https://vendor.example.com
-NEXT_PUBLIC_SITE_NAME=...
-NEXT_PUBLIC_SITE_DESCRIPTION=...
-NEXT_PUBLIC_STRIPE_KEY=pk_test_...
-REVALIDATE_SECRET=...                         # must match the API
-BUILD_JOBS=2
-```
-
-### `mercur-admin` and `mercur-vendor` (build-time)
-
-```
-VITE_MERCUR_BACKEND_URL=https://api.example.com
-BUILD_JOBS=2
-BUILD_HEAP_MB=6144
-```
+`mercur-api` also needs a **persistent volume at `/app/static`** if you use the
+local file provider — without it every upload is lost on redeploy. Not needed
+once `S3_BUCKET` is set.
 
 ---
 
@@ -182,7 +165,7 @@ responding mid-build, the host is starved — lower `BUILD_JOBS` to 1.
 | Setting | Value | Why |
 |---|---|---|
 | `BUILD_JOBS` | **2** | leaves one core for Traefik and the panel |
-| `BUILD_HEAP_MB` | **6144** | fits comfortably in 19.5 GB |
+| `BUILD_HEAP_MB` | **6144** | fits comfortably in 19.5 GB — **admin and vendor only** |
 | Deploys | **one at a time** | the reason for splitting the stack |
 
 A wedged host answers ping and completes TCP handshakes but returns **zero
