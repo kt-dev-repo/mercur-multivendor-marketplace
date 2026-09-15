@@ -124,6 +124,12 @@ cd apps/vendor     && bun run dev                                       # :7002 
 14. **Workspace binaries are not hoisted.** Under bun's isolated layout `medusa` and `vite` live in each workspace's own `node_modules/.bin`, not the repo root.
 15. **Store `shipping-options` are keyed by seller.** `GET /store/shipping-options?cart_id=…` returns an object mapping `seller_id -> options[]`, not a flat array. A multi-seller cart needs one shipping method added **per seller** before it can complete.
 
+16. **`podman build` silently drops `HEALTHCHECK`.** Podman defaults to the OCI image format, which has no healthcheck field, so a `HEALTHCHECK` in the Dockerfile vanishes and `podman inspect` reports `Config.Healthcheck: null`. Build with `--format docker` to keep it. Docker (and therefore Dokploy) is unaffected. Nothing in the compose stacks depends on it — the bundled file defines its own healthchecks and gates the dashboards on `service_started`.
+
+17. **Medusa's migration probe cannot complete under podman on macOS.** `medusa db:migrate` connects, creates `mikro_orm_migrations`, then aborts in `verifyMigrationConnection`. Raising `MEDUSA_DB_MIGRATION_CONNECTION_TIMEOUT` does not fix it — it only swaps the generic "incorrect database URL or SSL" message for the real one, `Knex: Timeout acquiring a connection. The pool is probably full`. Postgres is healthy throughout. Use host networking for a local migration; it is not reproducible on Docker/Linux, so it does not affect deploys. See `deploy/dokploy/README.md`.
+
+18. **Turbo builds `@mercurjs/core` for any dashboard build.** `@mercurjs/core` is a devDependency of `@mercurjs/dashboard-shared`, and turbo's `build` task is `dependsOn: ["^build"]` over all workspace deps. So `--filter=@mercurjs/dashboard-shared` pulls in `core` and `cli` — 6 tasks, not 4. It is cheap in practice (~18 s for all six) because `dashboard-shared` needs core's declarations for its own `dts: true`; do not "optimise" it away without checking that.
+
 ## Repo Working Rules (from CLAUDE.md — these are enforced)
 
 - `bun` only. Never npm/yarn/pnpm.

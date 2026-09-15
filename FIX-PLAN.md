@@ -24,6 +24,23 @@ Remediation plan from the static audit of **2026-09-10** against upstream base
 >   §0 is the slot for them. Do not treat a static finding as exploitable until
 >   §0 says so.
 
+> **Deploy verification 2026-09-15 (podman 6.1.0, applehv, 8 vCPU).** The two
+> dashboard commits (`4c1a3bf88`, `243ef9069`) were reviewed and smoke-tested.
+> Both `--target admin` and `--target vendor` build from the shared
+> `build-common` layer and produce byte-identical `dist` on rebuild; the two
+> bundles are genuinely distinct (no `sdk.vendor` in admin, no `sdk.admin` in
+> vendor); all 14 overlays resolve inside the image with no git, via the `patch`
+> fallback; both dashboards serve, fall back to the SPA shell on deep routes,
+> 404 a missing asset, send `no-store` on `index.html`, and carry the baked
+> `VITE_MERCUR_BACKEND_URL`; all three compose files parse. Three gaps found and
+> fixed in this pass: `IMAGE_REPO`/`IMAGE_TAG` were required by the registry
+> stack but absent from `.env.example`; a stale `BUILD_HEAP_MB` comment in the
+> registry compose referred to build knobs that file does not have; and the
+> README's overlay row still claimed 3 overlays. **The API stack could not be
+> taken end-to-end on this host** — see §P3 below and the migration-probe note in
+> `deploy/dokploy/README.md`. That is a podman-on-macOS limit, not a regression
+> and not a deploy blocker.
+
 ---
 
 ## Rule 0 — how every fix must be delivered

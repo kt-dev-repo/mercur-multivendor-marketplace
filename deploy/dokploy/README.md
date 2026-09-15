@@ -458,6 +458,7 @@ drops in-flight workflow state. Appendonly persistence is on.
 | **Dokploy panel itself goes down during a deploy** | Host OOM: the kernel killed Traefik or the panel instead of the build. Tell-tale signs are a host that still answers ping and still completes TCP handshakes on 80/443/3000 while returning zero bytes. Recover from the provider console (SSH is usually unreachable too), then set `COMPOSE_PARALLEL_LIMIT=1`, lower `BUILD_HEAP_MB`, and add swap — or move builds to CI, §1a. |
 | `Parsing error: The keyword 'export' is reserved` | Root `eslint.config.mts` missing from the build context. |
 | ``` `column` must be greater than or equal to 0 ``` | Something is running medusa under bun instead of Node. |
+| Dashboard container shows no health status under **podman** | Expected. `podman build` defaults to the OCI image format, which has no `HEALTHCHECK` field, so the one in `Dockerfile.dashboard` is silently dropped. Build with `--format docker` if you want it locally. Docker/Dokploy keep it. |
 | `File /app/src/scripts/seed.ts doesn't exist` | Use the compiled `seed.js` path; the entrypoint handles this. |
 
 ## What was verified before shipping these files
@@ -480,11 +481,33 @@ written:
 | `Dockerfile.dashboard` builds (`--target vendor`) | yes |
 | `Dockerfile.dashboard` builds (`--target admin`) | yes; distinct bundle from vendor (different asset hashes) |
 | Dashboard serves a missing asset | 404, not an index.html fallback |
-| Overlays applied in every image build | 001 + 002 + 004 applied, 003 correctly skipped |
+| Overlays applied in every image build | all 14 present; 13 applied, 003 correctly skipped (its targets are `docs/`, not copied into the image) |
 | S3 provider switch (overlay 004) against MinIO | upload → object in bucket → fetched back byte-identical; unsetting `S3_BUCKET` reverts to local |
 | 404s in the **production** storefront image | unknown product / seller / collection → **404**; `/de`, existing product, existing seller → **200** |
 | Dashboard SPA fallback on a deep route | 200, not 404 |
 | `VITE_MERCUR_BACKEND_URL` baked into the bundle | found in `assets/*.js` |
+
+### Re-verified 2026-09-15 (podman 6.1.0, applehv, 8 vCPU)
+
+Covers the two-target dashboard split and the compose/CI changes that followed it.
+
+| Check | Result |
+|---|---|
+| `--target admin` and `--target vendor` both build | yes, from the shared `build-common` layer |
+| Rebuild produces byte-identical `dist` | yes — the runtime `COPY --from` layers cache-hit against the previous build |
+| Admin and vendor are genuinely different apps | titles `Mercur Admin` / `Mercur Vendor Hub`; no `sdk.vendor` in the admin bundle and no `sdk.admin` in the vendor bundle |
+| Overlays inside the image without git | all 14 resolved via the `patch` fallback; 13 applied, 003 skipped |
+| `GET /` on both dashboards | 200 `text/html` |
+| SPA fallback on a deep route (`/orders/<id>`, `/products/<id>`) | 200 |
+| Missing asset (`/nope.js`) | 404 — does not fall through to `index.html` |
+| `index.html` cache header | `no-store, must-revalidate` |
+| Build-arg URL baked into the bundle | `http://localhost:9000` present in `assets/chunk-*.js` |
+| Locale chunks split out of the main bundle | yes — per-locale `assets/<lang>-*.js` (437 files total) |
+| All three compose files parse | `podman compose config` OK for `dokploy`, `dokploy.registry`, `dokploy-bundled` |
+| API entrypoint dependency wait | `postgres reachable` / `redis reachable`, then migrations start |
+| API full migration on this host | **blocked** — see "A note on the migration connection probe"; podman/macOS only |
+| Image-level `HEALTHCHECK` under podman | dropped by the default OCI format; present with `--format docker` |
+
 
 ## A note on the migration connection probe
 
@@ -512,6 +535,30 @@ node -e "new (require('/app/node_modules/pg').Client)({connectionString:process.
 If that succeeds, the probe is the problem, not your URL — raise
 `MEDUSA_DB_MIGRATION_CONNECTION_TIMEOUT`. This was not reproduced on Docker under
 Linux, which is what Dokploy runs.
+
+**Raising the timeout does not always clear it under podman on macOS.** Re-tested
+2026-09-15 on podman 6.1.0 (applehv, 8 vCPU) with the API, Postgres 16 and Redis 7
+on a user-defined bridge. At the documented `30000` the run aborted with the
+generic "incorrect database URL or an SSL configuration issue" message. Raising it
+to `300000` on a freshly created database did **not** let the migration through —
+it changed the failure instead:
+
+```
+Could not connect to the database while running migrations:
+Knex: Timeout acquiring a connection. The pool is probably full.
+  at verifyMigrationConnection (/app/node_modules/@medusajs/modules-sdk/dist/medusa-app.js:44)
+```
+
+In both runs Medusa had already connected and created `mikro_orm_migrations`
+moments earlier, and `psql` against the same database succeeded throughout. So the
+probe is starving on *pool acquisition*, not on reachability, and the timeout knob
+only decides which of the two timers reports it. Treat a raised
+`MEDUSA_DB_MIGRATION_CONNECTION_TIMEOUT` as a diagnostic step, not a guaranteed
+fix, and fall back to host networking (which migrated a fresh database in 20 s) if
+you need a working migration locally.
+
+None of this has been observed on Docker under Linux. It blocks local end-to-end
+testing on macOS, not Dokploy deploys.
 
 ## Known upstream issues affecting deploys
 

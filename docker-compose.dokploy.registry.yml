@@ -130,8 +130,8 @@ services:
     image: ${IMAGE_REPO}-vendor:${IMAGE_TAG:-latest}
     pull_policy: always
     restart: unless-stopped
-    # nginx serving static files — tiny at runtime. The build is the expensive
-    # part, and that is bounded by BUILD_HEAP_MB above.
+    # nginx serving static files — tiny at runtime. Nothing is built here; the
+    # build happens in CI, so there are no build knobs in this file.
     mem_limit: ${DASHBOARD_MEM_LIMIT:-256m}
     networks: [dokploy]
     expose:

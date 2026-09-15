@@ -68,8 +68,16 @@ Upstream files are never edited in a commit. Fixes live as patches in
 time, or temporarily in a checkout with `./deploy/overlays/apply.sh`
 (`--check` / `--revert` / `--only <prefix>`).
 
-Currently: storefront soft-404s, the `test:unit` @swc/jest resolution failure,
-and the wrong dashboard ports in the upstream docs.
+Currently 14 overlays (001–014), covering storefront soft-404s, the `test:unit`
+@swc/jest resolution failure, the wrong dashboard ports in the upstream docs, the
+S3 file-provider switch, store line-item pricing, cart-complete idempotency, store
+order-detail customer scoping, the offer/inventory seller link, vendor product
+ownership and sub-route scoping, lazy locale chunks for both dashboards, the admin
+i18n duplicate-key fix, and turbo's next-build outputs.
+
+Verified 2026-09-15 inside an image build with no git: 13 applied via the `patch`
+fallback, and 003 correctly skipped because its targets (`docs/`) are not copied
+into the image.
 
 While overlays are applied, `git status` shows modified upstream files. That is
 expected. **Never commit an overlaid file** — run `apply.sh --revert` first.
@@ -82,6 +90,17 @@ resolves to Podman 6.1.0 (`linux/arm64/fedora-44`). `docker compose` and
 
 ## Toolchain gotchas
 
+- **`podman build` drops `HEALTHCHECK`.** Podman defaults to the OCI image
+  format, which has no healthcheck field, so the one in `Dockerfile.dashboard`
+  silently disappears and `podman inspect` shows `Config.Healthcheck: null`. Use
+  `--format docker` locally if you need it. Docker/Dokploy keep it, and nothing
+  in the compose stacks depends on it.
+- **The API cannot finish migrations under podman on macOS.** It connects,
+  creates `mikro_orm_migrations`, then aborts in `verifyMigrationConnection`.
+  Raising `MEDUSA_DB_MIGRATION_CONNECTION_TIMEOUT` only changes the error to the
+  honest one (`Knex: Timeout acquiring a connection. The pool is probably full`).
+  Not reproducible on Docker/Linux, so it blocks local end-to-end testing only —
+  not deploys. Use host networking for a local migration.
 - No `bunx` — use `bun x`.
 - `bun run test:unit` needs `node_modules/@swc/{jest,core}` symlinked from
   `integration-tests/node_modules` (bun does not hoist them; `--rootDir ..`
