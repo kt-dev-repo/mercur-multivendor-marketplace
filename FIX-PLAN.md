@@ -41,6 +41,46 @@ Remediation plan from the static audit of **2026-09-10** against upstream base
 > `deploy/dokploy/README.md`. That is a podman-on-macOS limit, not a regression
 > and not a deploy blocker.
 
+> **CI has a permanently red baseline, and it is our doing (found 2026-09-15).**
+> On `243ef9069` the integration workflow failed shards 2 and 3. The failures are
+> *exactly* the five `*.local.spec.ts` files and nothing else — shards 1 and 4 are
+> green, and across both failing shards 377 other tests pass:
+>
+> | spec | overlay |
+> |---|---|
+> | `store-line-item-price-tampering.local.spec.ts` | `005` |
+> | `cart-complete-idempotency.local.spec.ts` | `006` |
+> | `order-detail-pii-leak.local.spec.ts` | `007` |
+> | `offer-inventory-seller-link.local.spec.ts` | `008` |
+> | `product-ownership.local.spec.ts` | `009` |
+>
+> Cause: **no workflow applies the overlays.** `apply.sh` runs inside image builds
+> only, so CI checks out pristine upstream code, where the five fixes do not
+> exist — and the specs written to prove those fixes correctly fail. They cannot
+> pass in CI as configured.
+>
+> This is not cosmetic. A permanently red required check means the suite can no
+> longer tell us about a real regression, which is the whole point of P1.4.
+>
+> It cannot be fixed by editing `.github/workflows/integration-tests.yml` —
+> that file is upstream-tracked, and an overlay against it would not help, since
+> GitHub reads the workflow from the commit, not from a patched working tree.
+> Options, in preference order:
+>
+> 1. **New local workflow** (a new file is allowed; editing an upstream one is
+>    not) that applies overlays and runs only the five local specs. Leaves the
+>    upstream workflow still red on them unless combined with 2.
+> 2. **Make each `*.local.spec.ts` self-skip when its fix is absent** — probe the
+>    behaviour, `describe.skip` with a clear reason when the overlay is not
+>    applied. The specs are local files, so this breaks no invariant, and it makes
+>    them meaningful in both worlds.
+> 3. Exclude `*.local.spec.ts` from CI entirely. Cheapest, and throws away the
+>    regression guard.
+>
+> 1 + 2 together is the only combination that restores a green baseline *and*
+> keeps the security regressions actually guarded. **Not yet implemented —
+> needs a decision.**
+
 ---
 
 ## Rule 0 — how every fix must be delivered
