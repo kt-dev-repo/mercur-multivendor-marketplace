@@ -96,6 +96,9 @@ services:
       S3_CACHE_CONTROL: ${S3_CACHE_CONTROL:-}
       S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-}
       S3_ACL: ${S3_ACL:-}
+      # JSON, merged into the S3 client config. Malformed JSON throws at
+      # config load and the API never boots, so leave it empty unless needed.
+      S3_ADDITIONAL_CLIENT_CONFIG: ${S3_ADDITIONAL_CLIENT_CONFIG:-}
       PORT: 9000
       ADMIN_EMAIL: ${ADMIN_EMAIL}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}

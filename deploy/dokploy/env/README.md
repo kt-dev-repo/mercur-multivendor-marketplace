@@ -64,3 +64,86 @@ effect.
 
 Secrets (`JWT_SECRET`, `COOKIE_SECRET`, `STOREFRONT_REVALIDATE_SECRET`) should be
 generated independently: `openssl rand -base64 32`.
+
+## Complete variable map
+
+Audited 2026-09-16 by extracting every `process.env.*` from `apps/api`,
+`packages/core`, `apps/storefront` and the overlays, then cross-checking against
+every Dockerfile `ARG`, the CI build-args, all three compose files and these env
+files. Kept in that state — if you add a variable, add it everywhere its column
+says it belongs.
+
+| Variable | Read by | When | Set in |
+|---|---|---|---|
+| `DATABASE_URL` | api entrypoint + medusa-config | runtime | api |
+| `REDIS_URL` | api entrypoint + medusa-config | runtime | api |
+| `JWT_SECRET` `COOKIE_SECRET` | medusa-config | runtime | api |
+| `STORE_CORS` `ADMIN_CORS` `VENDOR_CORS` `AUTH_CORS` | medusa-config | runtime | api |
+| `FILE_BACKEND_URL` | medusa-config (local file provider) | runtime | api |
+| `S3_*` | overlay 004 | runtime | api |
+| `MERCUR_VENDOR_URL` | `packages/core` seller module | runtime | api |
+| `STOREFRONT_REVALIDATE_URL` `STOREFRONT_REVALIDATE_SECRET` | api revalidate subscriber | runtime | api |
+| `ADMIN_EMAIL` `ADMIN_PASSWORD` `RUN_SEED` `WAIT_TIMEOUT` `PORT` | api entrypoint | runtime | api |
+| `MEDUSA_DB_MIGRATION_CONNECTION_TIMEOUT` | Medusa framework | runtime | api |
+| `MEDUSA_BACKEND_URL` | storefront server | runtime | storefront |
+| `REVALIDATE_SECRET` | storefront revalidate route | runtime | storefront |
+| `NEXT_PUBLIC_*` | storefront browser bundle | **build** | storefront |
+| `VITE_MERCUR_BACKEND_URL` | dashboard bundle | **build** | admin, vendor |
+| `BUILD_JOBS` | all four Dockerfiles | **build** | all four |
+| `BUILD_HEAP_MB` | `Dockerfile.dashboard` only | **build** | admin, vendor |
+
+Pairs that carry the same value under different names — getting these out of
+step fails silently:
+
+| This | must equal | this |
+|---|---|---|
+| api `STOREFRONT_REVALIDATE_SECRET` | = | storefront `REVALIDATE_SECRET` |
+| api `STOREFRONT_REVALIDATE_URL` | = | the storefront's public domain |
+| api `MERCUR_VENDOR_URL` | = | the vendor app's public domain |
+| storefront `MEDUSA_BACKEND_URL`, dashboards `VITE_MERCUR_BACKEND_URL` | = | the api app's public domain |
+
+## If NO variables reach the container
+
+Seen in production on 2026-09-15. The API crash-looped and the entrypoint's
+preflight listed the environment variable names the container could actually
+see:
+
+```
+HOME HOSTNAME NODE_ENV NODE_VERSION PATH PWD YARN_VERSION
+```
+
+That is a bare `node:22-bookworm-slim` plus the `NODE_ENV` our own Dockerfile
+sets — in other words **not one** user-supplied variable, including ones that
+were definitely typed into the UI. When the list looks like that, the problem is
+not a typo or a bad value; the Environment is not being injected at all, and no
+amount of editing the values will help.
+
+Check, in this order:
+
+1. **Wrong field.** Runtime values must be in the Application's **Environment**
+   tab. Anything put in a build-args field never reaches a running container.
+2. **Wrong entity.** Confirm you are editing the application that is actually
+   deployed, not a second application or a leftover Compose service in the same
+   project.
+3. **Project-scoped variables are not inherited.** Dokploy project/shared
+   variables must be referenced explicitly from the app, e.g.
+   `DATABASE_URL=${{project.DATABASE_URL}}`. Pasting them at project level does
+   nothing on its own.
+
+Confirm server-side what Dokploy actually wrote into the Swarm service:
+
+```bash
+docker service inspect $(docker service ls --format '{{.Name}}' | grep api) \
+  --format '{{json .Spec.TaskTemplate.ContainerSpec.Env}}'
+```
+
+`null` or a list without your variables proves Dokploy never wrote them. As a
+stopgap you can inject them directly — a redeploy will overwrite this, so still
+fix the tab:
+
+```bash
+docker service update \
+  --env-add DATABASE_URL='postgres://USER:PASS@INTERNAL-HOST:5432/DB' \
+  --env-add REDIS_URL='redis://INTERNAL-HOST:6379' \
+  $(docker service ls --format '{{.Name}}' | grep api)
+```

@@ -81,6 +81,21 @@ Remediation plan from the static audit of **2026-09-10** against upstream base
 > keeps the security regressions actually guarded. **Not yet implemented —
 > needs a decision.**
 
+> **Env-variable relation audit, 2026-09-16.** Extracted every `process.env.*`
+> from `apps/api`, `packages/core`, `apps/storefront` and the overlays, then
+> cross-checked against every Dockerfile `ARG`, the CI build-args, all three
+> compose files and the five env examples. One real gap:
+> `S3_ADDITIONAL_CLIENT_CONFIG` is read by overlay `004` but was passed by none
+> of the compose files and absent from `.env.example`, so a Compose deploy could
+> not set it at all — fixed. Everything else reconciles: no compose `${VAR}`
+> undeclared, nothing the API reads missing from `env/api.env.example`, no unused
+> entries, every storefront/dashboard `ARG` present in both the env files and the
+> CI build-args, no CI build-arg that no Dockerfile declares, and the four
+> cross-app pairings (`STOREFRONT_REVALIDATE_SECRET`/`REVALIDATE_SECRET`,
+> `MERCUR_VENDOR_URL`, `STOREFRONT_REVALIDATE_URL`, `MEDUSA_BACKEND_URL`) all
+> resolve to the same source variable. The resulting map is documented in
+> `deploy/dokploy/env/README.md` and should be kept in that state.
+
 ---
 
 ## Rule 0 — how every fix must be delivered

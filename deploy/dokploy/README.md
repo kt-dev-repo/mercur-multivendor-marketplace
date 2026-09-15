@@ -467,6 +467,10 @@ drops in-flight workflow state. Appendonly persistence is on.
 | ``` `column` must be greater than or equal to 0 ``` | Something is running medusa under bun instead of Node. |
 | Dashboard container shows no health status under **podman** | Expected. `podman build` defaults to the OCI image format, which has no `HEALTHCHECK` field, so the one in `Dockerfile.dashboard` is silently dropped. Build with `--format docker` if you want it locally. Docker/Dokploy keep it. |
 | Dashboard build fails with "This Dockerfile has no default stage" | Working as intended. Set the Application's **Docker Build Stage** to `admin` or `vendor` (or pass `--target`). Without it the build would otherwise produce the vendor dashboard silently, whatever you named the app. |
+| API crash-loops and the preflight lists only `HOME HOSTNAME NODE_ENV NODE_VERSION PATH PWD YARN_VERSION` | That is the bare base image plus our own `NODE_ENV` — **zero** injected variables. Not a typo or a bad value: the Environment is not reaching the container. See `env/README.md` → "If NO variables reach the container". |
+| Admin panel login impossible after a successful boot | `ADMIN_PASSWORD` empty. The entrypoint only creates the user when BOTH `ADMIN_EMAIL` and `ADMIN_PASSWORD` are non-empty, so an empty password silently skips it. |
+| Storefront and dashboards empty on a brand-new database | `RUN_SEED` was never `true`, so there is no publishable API key, region or sales channel. Seed once against the empty database, then set it back to `false`. |
+| API fails at config load with a JSON parse error | `S3_ADDITIONAL_CLIENT_CONFIG` is `JSON.parse`d. Malformed JSON stops the boot before any S3 call happens. |
 | `File /app/src/scripts/seed.ts doesn't exist` | Use the compiled `seed.js` path; the entrypoint handles this. |
 
 ## What was verified before shipping these files
