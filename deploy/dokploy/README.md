@@ -306,13 +306,22 @@ and logs which one it could not reach.
 Copy `deploy/dokploy/.env.example` into the service's **Environment** tab and
 fill every `CHANGE_ME`.
 
-Generate secrets separately, never reuse one value:
+Generate secrets separately, never reuse one value. Prefer **hex** — it is
+URL-safe, env-safe and shell-safe, so the same value can go anywhere:
 
 ```bash
-openssl rand -base64 32   # JWT_SECRET
-openssl rand -base64 32   # COOKIE_SECRET
-openssl rand -base64 32   # REVALIDATE_SECRET
+openssl rand -hex 32   # JWT_SECRET
+openssl rand -hex 32   # COOKIE_SECRET
+openssl rand -hex 32   # REVALIDATE_SECRET
+openssl rand -hex 24   # database / Redis password
 ```
+
+`openssl rand -base64 32` is equally strong and perfectly fine for the three
+secrets — its `/`, `+` and trailing `=` survive every layer untouched, so an
+existing base64 secret needs no escaping and no regenerating. But **never reuse
+a base64 value as the password inside `DATABASE_URL` or `REDIS_URL`**: a `/`
+there makes the URL unparseable. See `env/README.md` → "Special characters in
+values".
 
 For the **first** deploy set:
 
@@ -471,6 +480,7 @@ drops in-flight workflow state. Appendonly persistence is on.
 | Admin panel login impossible after a successful boot | `ADMIN_PASSWORD` empty. The entrypoint only creates the user when BOTH `ADMIN_EMAIL` and `ADMIN_PASSWORD` are non-empty, so an empty password silently skips it. |
 | Storefront and dashboards empty on a brand-new database | `RUN_SEED` was never `true`, so there is no publishable API key, region or sales channel. Seed once against the empty database, then set it back to `false`. |
 | API fails at config load with a JSON parse error | `S3_ADDITIONAL_CLIENT_CONFIG` is `JSON.parse`d. Malformed JSON stops the boot before any S3 call happens. |
+| API dies at the dependency-wait, or `Invalid URL` | A `/` or `#` in the password inside `DATABASE_URL` / `REDIS_URL`. `new URL()` rejects it, so it reads like a networking fault. Regenerate as hex (`openssl rand -hex 24`) or percent-encode (`/`→`%2F`, `#`→`%23`). Reusing a base64 secret as a DB password fails exactly this way. |
 | `File /app/src/scripts/seed.ts doesn't exist` | Use the compiled `seed.js` path; the entrypoint handles this. |
 
 ## What was verified before shipping these files

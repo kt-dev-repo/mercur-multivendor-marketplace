@@ -134,6 +134,8 @@ cd apps/vendor     && bun run dev                                       # :7002 
 
 20. **`Dockerfile.dashboard` has no default stage, on purpose.** Building it without `--target` used to exit 0 and silently produce the **vendor** dashboard, because that was the last stage — so a Dokploy Application named `mercur-admin` with an empty Build Stage field served the vendor panel on the admin domain. It now ends in a `select-a-build-stage` guard that fails in ~1s. Always pass `--target admin` or `--target vendor`.
 
+21. **A base64 secret cannot be used as a database password.** `DATABASE_URL` and `REDIS_URL` are parsed with `new URL()`, which throws `Invalid URL` on `/` or `#` in the password — and `openssl rand -base64` emits `/`. It fails at the entrypoint's dependency-wait, so it reads like a networking fault rather than a bad character. `@` and `:` happen to survive (the last `@` wins as the delimiter). Generate database passwords as `openssl rand -hex 24`, or percent-encode. By contrast, plain env VALUES tolerate `/ + =` fine — every layer splits on the first `=` and takes the rest verbatim — so an existing base64 `JWT_SECRET` needs no escaping.
+
 ## Repo Working Rules (from CLAUDE.md — these are enforced)
 
 - `bun` only. Never npm/yarn/pnpm.

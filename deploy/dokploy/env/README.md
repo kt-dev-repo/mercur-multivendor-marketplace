@@ -63,7 +63,9 @@ effect.
 | storefront `NEXT_PUBLIC_DEFAULT_REGION` | a region the seed created (default `de`) |
 
 Secrets (`JWT_SECRET`, `COOKIE_SECRET`, `STOREFRONT_REVALIDATE_SECRET`) should be
-generated independently: `openssl rand -base64 32`.
+generated independently: `openssl rand -hex 32`. See "Special characters in
+values" below for why hex rather than base64, and for the one place the
+difference actually matters.
 
 ## Complete variable map
 
@@ -101,6 +103,48 @@ step fails silently:
 | api `STOREFRONT_REVALIDATE_URL` | = | the storefront's public domain |
 | api `MERCUR_VENDOR_URL` | = | the vendor app's public domain |
 | storefront `MEDUSA_BACKEND_URL`, dashboards `VITE_MERCUR_BACKEND_URL` | = | the api app's public domain |
+
+## Special characters in values
+
+Two different rules, and conflating them is how people either escape things that
+never needed it or reuse a secret somewhere it breaks.
+
+**Plain environment values** (`JWT_SECRET`, `COOKIE_SECRET`,
+`STOREFRONT_REVALIDATE_SECRET`, …) accept effectively anything. Every layer
+splits on the FIRST `=` and takes the remainder verbatim, so base64's `/`, `+`
+and trailing `=` all survive untouched. Verified byte-for-byte through
+`docker -e`, `--env-file`, and Compose `${VAR}` interpolation, with both `=` and
+`==` padding. **An existing base64 secret needs no quoting, no escaping and no
+regenerating.** The only character worth avoiding is `$`, which some parsers
+interpolate.
+
+**A password inside a URL** (`DATABASE_URL`, `REDIS_URL`) is the opposite: it is
+parsed as a URL, so `/` and `#` make it invalid outright. Verified with the same
+`new URL()` the entrypoint uses:
+
+| Password contains | Result |
+|---|---|
+| alphanumeric only | OK |
+| `@` | OK (the last `@` wins as the delimiter) |
+| `:` | OK |
+| `/` | **Invalid URL** |
+| `#` | **Invalid URL** |
+| a base64 secret | **Invalid URL** — base64 emits `/` |
+
+That last row is the trap: reusing a base64 secret as a database password fails,
+and it fails at the dependency-wait with a message that reads like a networking
+problem.
+
+**So: generate everything as hex and the distinction stops mattering.**
+
+```bash
+openssl rand -hex 32     # secrets  — 64 chars, 256-bit
+openssl rand -hex 24     # db passwords — 48 chars, 192-bit
+```
+
+Hex is `[0-9a-f]` only: URL-safe, env-safe, shell-safe. If you are stuck with a
+password you cannot change, percent-encode it instead:
+`/`→`%2F`, `#`→`%23`, `?`→`%3F`, `@`→`%40`, `%`→`%25`.
 
 ## If NO variables reach the container
 
