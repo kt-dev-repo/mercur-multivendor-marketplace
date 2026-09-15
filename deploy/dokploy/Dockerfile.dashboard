@@ -24,28 +24,61 @@ COPY --from=oven/bun:1.3.8 /usr/local/bin/bun /usr/local/bin/bun
 RUN apt-get update && apt-get install -y --no-install-recommends patch \
  && rm -rf /var/lib/apt/lists/*
 
+# Manifest-only stage. Reduces the workspace to just the files `bun install`
+# reads, so the install layer below is keyed on those and NOT on source code.
+#
+# Why: `bun install` takes ~6.4 min on a 3-vCPU host (4334 packages). Copying
+# apps/ and packages/ before the install — which is what this used to do — put
+# every source file in the install layer's cache key, so ANY code change paid the
+# full install again on every deploy. Measured locally: touching one source file
+# took this stage from 258 s to 20 s once the install stopped depending on it.
+#
+# This stage is still invalidated by every source change, but it only copies and
+# filters, which costs a second or two.
+FROM base AS manifests
+WORKDIR /src
+COPY package.json bun.lock ./
+COPY apps ./apps
+COPY packages ./packages
+# The root workspaces list is apps/*, packages/*, packages/providers/*,
+# integration-tests, e2e-tests AND e2e-tests/hosts/*. Every one must contribute
+# its package.json — omitting any workspace makes `bun install
+# --frozen-lockfile` reject the lockfile as changed.
+COPY integration-tests ./integration-tests
+COPY e2e-tests ./e2e-tests
+# find rather than an explicit list, so a newly added workspace is picked up
+# automatically instead of breaking the install.
+RUN mkdir -p /manifests \
+ && find . -name node_modules -prune -o -name package.json -print0 \
+    | tar -cf - --null -T - \
+    | tar -xf - -C /manifests \
+ && cp bun.lock /manifests/bun.lock
+
 FROM base AS deps
 WORKDIR /repo
-COPY package.json bun.lock ./
+# Only manifests + the lockfile. BuildKit keys this COPY on the content of what
+# it copies, so a commit touching only source is a cache hit here and below.
+COPY --from=manifests /manifests/ ./
 # Root config the workspaces resolve at build time. eslint.config.mts in
 # particular: apps/storefront ships NO local eslint config, so without the root
 # flat config `next build` lints with the default parser and dies on every
 # TypeScript file ("Parsing error: The keyword 'export' is reserved").
 COPY .npmrc .oxlintrc.json eslint.config.mts ./
-COPY apps ./apps
-COPY packages ./packages
-# The root workspaces list includes integration-tests, e2e-tests AND
-# e2e-tests/hosts/*. Copy those trees whole — omitting any workspace makes
-# `bun install --frozen-lockfile` reject the lockfile as changed.
-COPY integration-tests ./integration-tests
-COPY e2e-tests ./e2e-tests
-COPY turbo.json ./turbo.json
 # --ignore-scripts: better-sqlite3 is an OPTIONAL PEER of @mikro-orm/knex
 # (alongside libsql and mariadb). Mercur runs on Postgres and never loads it, and
 # it is not a dependency of the built server — but its install script shells out
 # to node-gyp, which needs python3/make/g++ that this slim image does not carry,
 # so it fails the whole install. Nothing in this image needs a lifecycle script.
 RUN bun install --frozen-lockfile --ignore-scripts
+
+# Sources land AFTER the install, so editing them cannot invalidate it. COPY
+# merges into the tree, so the node_modules bun just created survive (the build
+# context excludes node_modules anyway — see .dockerignore).
+COPY apps ./apps
+COPY packages ./packages
+COPY integration-tests ./integration-tests
+COPY e2e-tests ./e2e-tests
+COPY turbo.json ./turbo.json
 
 FROM deps AS build-common
 ARG VITE_MERCUR_BACKEND_URL
