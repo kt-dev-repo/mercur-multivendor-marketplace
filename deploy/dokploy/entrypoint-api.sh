@@ -4,8 +4,54 @@
 # decorator metadata lookup on Linux.
 set -e
 
-: "${DATABASE_URL:?DATABASE_URL is required}"
-: "${REDIS_URL:?REDIS_URL is required}"
+# Preflight. Report EVERY missing variable at once, and say where to set it.
+#
+# The bare `${VAR:?msg}` form this replaced died on the first missing variable
+# with a one-line dash error and exit 2, which under Dokploy (Swarm) becomes a
+# silent crash-loop: "Exited (2)" over and over with no indication of whether the
+# value was wrong, empty, or never injected at all.
+#
+# The visible-names dump below is the diagnosis. If DATABASE_URL is absent from
+# it, the Environment tab never reached this container (unsaved, or saved without
+# a redeploy) — that is a Dokploy wiring problem, not a database problem. If it
+# IS listed, the value is empty and the entry is malformed.
+missing=""
+for var in DATABASE_URL REDIS_URL; do
+  eval "value=\$$var"
+  [ -n "$value" ] || missing="$missing $var"
+done
+
+if [ -n "$missing" ]; then
+  echo >&2 ""
+  echo >&2 "=============================================================="
+  echo >&2 " Cannot start: required environment variable(s) not set"
+  echo >&2 "=============================================================="
+  for var in $missing; do
+    echo >&2 "  MISSING: $var"
+  done
+  echo >&2 ""
+  echo >&2 " Set these in Dokploy on the API application:"
+  echo >&2 "   Application -> Environment -> paste, SAVE, then Redeploy."
+  echo >&2 "   Saving alone does not restart the container."
+  echo >&2 ""
+  echo >&2 "   DATABASE_URL=postgres://USER:PASS@INTERNAL-HOST:5432/DB"
+  echo >&2 "   REDIS_URL=redis://INTERNAL-HOST:6379"
+  echo >&2 ""
+  echo >&2 " The host must be the database service INTERNAL hostname, taken from"
+  echo >&2 " its own Dokploy page. NOT localhost — inside this container that means"
+  echo >&2 " this container. See deploy/dokploy/env/api.env.example."
+  echo >&2 ""
+  echo >&2 " Environment variable NAMES visible to this container (values hidden):"
+  # Names only. Values would put DATABASE_URL credentials in the log, which
+  # Dokploy renders in the browser and keeps.
+  env | cut -d= -f1 | sort | sed 's/^/   /' >&2
+  echo >&2 ""
+  echo >&2 " If the names above do not include the ones marked MISSING, the"
+  echo >&2 " Environment tab is not reaching this container at all."
+  echo >&2 "=============================================================="
+  echo >&2 ""
+  exit 1
+fi
 
 MEDUSA=/app/node_modules/.bin/medusa
 
