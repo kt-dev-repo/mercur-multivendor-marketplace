@@ -83,6 +83,17 @@ COPY turbo.json ./turbo.json
 FROM deps AS build-common
 ARG VITE_MERCUR_BACKEND_URL
 ENV VITE_MERCUR_BACKEND_URL=$VITE_MERCUR_BACKEND_URL
+# Admin only: where the VENDOR app lives. apps/admin-test/vite.config.ts reads it
+# and the dashboard-sdk compiles it in as __VENDOR_URL__.
+#
+# Without it a production build falls back to the RELATIVE path "/seller", which
+# the admin then resolves against its own origin — so every seller invite link
+# generated in the admin panel points at https://admin.<domain>/seller/invite and
+# 404s. The fallback is invisible at build time and the link looks plausible, so
+# this only ever surfaces as "invited sellers get a dead link".
+# apps/vendor does not read this; setting it for the vendor target is harmless.
+ARG VITE_MERCUR_VENDOR_URL
+ENV VITE_MERCUR_VENDOR_URL=$VITE_MERCUR_VENDOR_URL
 # Build parallelism. On a small host this matters more than memory: turbo.json
 # sets concurrency 20, esbuild's Go runtime and SWC's rayon pool each size
 # themselves to the core count, so ONE image build can still saturate every vCPU

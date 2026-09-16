@@ -99,7 +99,7 @@ ADMIN_CORS=http://localhost:7000,http://localhost:7001,http://localhost:9000
 VENDOR_CORS=http://localhost:7001,http://localhost:7002
 AUTH_CORS=http://localhost:3000,http://localhost:7000,http://localhost:7001,http://localhost:7002,http://localhost:9000
 MERCUR_VENDOR_URL=http://localhost:7002
-STOREFRONT_REVALIDATE_URL=http://localhost:3000
+STOREFRONT_REVALIDATE_URL=http://localhost:3000/api/revalidate
 STOREFRONT_REVALIDATE_SECRET=supersecret
 FILE_BACKEND_URL=http://localhost:9000/static
 ```

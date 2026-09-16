@@ -146,6 +146,10 @@ COPY deploy/dokploy/entrypoint-api.sh /usr/local/bin/entrypoint-api.sh
 RUN chmod +x /usr/local/bin/entrypoint-api.sh
 
 EXPOSE 9000
+# The probe must follow PORT. It used to hardcode 9000 while the entrypoint
+# honoured $PORT, so setting PORT to anything else produced a container that
+# served correctly and NEVER went healthy — Traefik then has no backend and every
+# request 502s, which reads as "the app is down" when the app is fine.
 HEALTHCHECK --interval=15s --timeout=5s --start-period=120s --retries=10 \
-  CMD node -e "fetch('http://127.0.0.1:9000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||9000)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 ENTRYPOINT ["/usr/local/bin/entrypoint-api.sh"]

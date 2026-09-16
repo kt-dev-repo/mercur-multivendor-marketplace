@@ -94,7 +94,7 @@ services:
       VENDOR_CORS: ${VENDOR_CORS}
       AUTH_CORS: ${AUTH_CORS}
       MERCUR_VENDOR_URL: ${VENDOR_PUBLIC_URL}
-      STOREFRONT_REVALIDATE_URL: ${STOREFRONT_PUBLIC_URL}
+      STOREFRONT_REVALIDATE_URL: ${STOREFRONT_PUBLIC_URL}/api/revalidate
       STOREFRONT_REVALIDATE_SECRET: ${REVALIDATE_SECRET}
       # The local file provider bakes this origin into every uploaded file URL.
       # It must be the public API origin or images resolve to a broken host.
@@ -178,6 +178,7 @@ services:
       target: admin
       args:
         VITE_MERCUR_BACKEND_URL: ${API_PUBLIC_URL}
+        VITE_MERCUR_VENDOR_URL: ${VENDOR_PUBLIC_URL}
         BUILD_HEAP_MB: ${BUILD_HEAP_MB:-6144}
         BUILD_JOBS: ${BUILD_JOBS:-2}
     restart: unless-stopped
