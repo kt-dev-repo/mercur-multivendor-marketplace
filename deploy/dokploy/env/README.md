@@ -21,6 +21,66 @@ Deploy order is **api → storefront → admin → vendor**, one at a time. The 
 three bake the API URL into their bundles, and the storefront's publishable key
 does not exist until the API has seeded.
 
+## The procedure, one app at a time
+
+Do these in order. Do not start an app before the one above it is serving —
+three of the four need a value that does not exist until the API has booted.
+
+**For every app, the same five fields:**
+
+| Field | Where the value comes from |
+|---|---|
+| Repository / branch | this repo |
+| Dockerfile path | the table above |
+| Docker Build Stage | the table above — **required for admin and vendor**, empty for the other two |
+| Port | the table above |
+| Environment | the matching `*.env.example`, pasted and **saved** |
+
+**1. `mercur-api`** — paste `api.env.example`, Save, Deploy. Set `RUN_SEED=true`
+only if the database is brand new. Wait for the log line `→ Starting Medusa on
+9000`, then confirm from your own machine:
+
+```bash
+curl -sS -o /dev/null -w '%{http_code}\n' https://api.<domain>/health   # expect 200
+```
+
+A 502 here means the container is not healthy yet — migrations run *before* the
+server listens, and the healthcheck allows 120s of start period. If it persists,
+read the log from the top; the entrypoint prints the reason.
+
+**2. `mercur-storefront`** — you need the publishable key first, which only
+exists after the API has seeded:
+
+```
+Admin → Settings → Publishable API Keys
+```
+
+Paste `storefront.env.example` with that key in
+`NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY`, Save, Deploy. Every `NEXT_PUBLIC_*` is
+compiled into the browser bundle, so a later change needs **Redeploy (rebuild)**,
+never Restart.
+
+**3. `mercur-admin`** — paste `admin.env.example`. Set **Docker Build Stage =
+`admin`**; leaving it empty fails the build in ~1s with an explicit message
+rather than silently shipping the vendor dashboard. Save, Deploy.
+
+**4. `mercur-vendor`** — paste `vendor.env.example`. Set **Docker Build Stage =
+`vendor`**. Save, Deploy.
+
+**5. Verify the whole set**, not just that each page loads:
+
+```bash
+for h in api admin vendor; do
+  printf '%-8s ' "$h"
+  curl -sS -o /dev/null -w '%{http_code}\n' "https://$h.<domain>/"
+done
+```
+
+Then check the two things that fail *silently* and will not show up here — open
+the admin, invite a seller, and confirm the invite link points at the **vendor**
+domain (not `admin.<domain>/seller/...`); and edit a product, then confirm the
+storefront reflects it within a few seconds rather than serving a stale page.
+
 ## Which file do I want?
 
 | Topology | Env |
@@ -91,6 +151,7 @@ says it belongs.
 | `REVALIDATE_SECRET` | storefront revalidate route | runtime | storefront |
 | `NEXT_PUBLIC_*` | storefront browser bundle | **build** | storefront |
 | `VITE_MERCUR_BACKEND_URL` | dashboard bundle | **build** | admin, vendor |
+| `VITE_MERCUR_VENDOR_URL` | `apps/admin-test/vite.config.ts` → `__VENDOR_URL__` | **build** | **admin only** |
 | `BUILD_JOBS` | all four Dockerfiles | **build** | all four |
 | `BUILD_HEAP_MB` | `Dockerfile.dashboard` only | **build** | admin, vendor |
 
@@ -100,9 +161,20 @@ step fails silently:
 | This | must equal | this |
 |---|---|---|
 | api `STOREFRONT_REVALIDATE_SECRET` | = | storefront `REVALIDATE_SECRET` |
-| api `STOREFRONT_REVALIDATE_URL` | = | the storefront's public domain |
+| api `STOREFRONT_REVALIDATE_URL` | = | the storefront's public domain **+ `/api/revalidate`** |
 | api `MERCUR_VENDOR_URL` | = | the vendor app's public domain |
+| admin `VITE_MERCUR_VENDOR_URL` | = | the vendor app's public domain |
 | storefront `MEDUSA_BACKEND_URL`, dashboards `VITE_MERCUR_BACKEND_URL` | = | the api app's public domain |
+
+Two of those carry a path or a fallback and fail *silently* when wrong, so they
+are worth re-reading before a deploy:
+
+- **`STOREFRONT_REVALIDATE_URL` is a full endpoint, not an origin.** The
+  subscriber POSTs to it verbatim. The bare origin hits the storefront homepage,
+  Next answers 405, and the subscriber's `try/catch` swallows it — pages then go
+  stale forever with nothing in any log.
+- **`VITE_MERCUR_VENDOR_URL` has a relative fallback.** Unset, the admin build
+  silently uses `/seller`, and every seller invite link 404s on the admin domain.
 
 ## Special characters in values
 
@@ -162,17 +234,58 @@ were definitely typed into the UI. When the list looks like that, the problem is
 not a typo or a bad value; the Environment is not being injected at all, and no
 amount of editing the values will help.
 
-Check, in this order:
+### Step 1 — run the canary before changing anything
 
-1. **Wrong field.** Runtime values must be in the Application's **Environment**
+Do not re-paste the real env yet. You cannot tell the four causes below apart by
+looking at them, and a long paste adds new ways to be wrong. Add exactly one
+throwaway line to the API app's **Environment**, press **Save**, then
+**Redeploy**:
+
+```
+DOKPLOY_CANARY=1
+```
+
+Read the names list in the next crash log:
+
+| Canary in the list? | Meaning | Go to |
+|---|---|---|
+| **No** | The Environment tab is not reaching the container. The real values would have failed identically. | Step 2 |
+| **Yes** | Injection works; only `DATABASE_URL`/`REDIS_URL` were entered wrong — a wrapped line, a stray quote, or a `#` mid-value truncating it. | Step 3 |
+
+### Step 2 — the tab is not reaching the container
+
+Check in this order; the first is by far the most common.
+
+1. **Save was never pressed, or did not take.** The Environment tab is a
+   textarea. Typing into it and going straight to Redeploy gives exactly this —
+   zero variables, no warning. Press **Save**, confirm the values are still there
+   after a page reload, *then* Redeploy.
+2. **Wrong field.** Runtime values must be in the Application's **Environment**
    tab. Anything put in a build-args field never reaches a running container.
-2. **Wrong entity.** Confirm you are editing the application that is actually
+3. **Wrong entity.** Confirm you are editing the application that is actually
    deployed, not a second application or a leftover Compose service in the same
-   project.
-3. **Project-scoped variables are not inherited.** Dokploy project/shared
+   project. With the four-application topology it is easy to paste the API env
+   into `mercur-storefront`.
+4. **Project-scoped variables are not inherited.** Dokploy project/shared
    variables must be referenced explicitly from the app, e.g.
    `DATABASE_URL=${{project.DATABASE_URL}}`. Pasting them at project level does
    nothing on its own.
+
+### Step 3 — injection works, the values are wrong
+
+Re-read these two before anything else; they cause most of the remaining
+failures and both produce misleading errors:
+
+- **Host must be the INTERNAL hostname** from the Postgres/Redis service's own
+  Dokploy page. Not `localhost` — inside the container that means the API itself.
+  Not the public domain either.
+- **No `/` `#` `?` `[` `]` `%` in a database password.** `new URL()` throws on
+  `/` and `#`, and the API dies at the dependency-wait with a message that reads
+  like a network fault. A base64 secret fails exactly this way, because base64
+  emits `/`. Generate with `openssl rand -hex 24`.
+
+Then paste one variable per line, no surrounding quotes, no trailing spaces, and
+nothing after a `#` that you expect to survive.
 
 Confirm server-side what Dokploy actually wrote into the Swarm service:
 

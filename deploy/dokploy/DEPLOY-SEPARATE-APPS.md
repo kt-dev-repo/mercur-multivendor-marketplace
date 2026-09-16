@@ -99,7 +99,8 @@ those URLs must be the public ones — a browser cannot resolve a Docker hostnam
 | storefront (server) | api | `MEDUSA_BACKEND_URL` = public API URL | runtime |
 | storefront (browser) | api | `NEXT_PUBLIC_*` | **build** |
 | admin / vendor | api | `VITE_MERCUR_BACKEND_URL` = public API URL | **build** |
-| api | storefront | `STOREFRONT_REVALIDATE_URL` | runtime |
+| admin | vendor | `VITE_MERCUR_VENDOR_URL` = public vendor URL | **build** |
+| api | storefront | `STOREFRONT_REVALIDATE_URL` — full endpoint, **ending `/api/revalidate`** | runtime |
 | api | vendor | `MERCUR_VENDOR_URL` | runtime |
 
 **The build-time ones are the trap.** `VITE_MERCUR_BACKEND_URL` and every
