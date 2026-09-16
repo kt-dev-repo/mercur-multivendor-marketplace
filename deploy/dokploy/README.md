@@ -526,7 +526,7 @@ Covers the two-target dashboard split and the compose/CI changes that followed i
 | Build-arg URL baked into the bundle | `http://localhost:9000` present in `assets/chunk-*.js` |
 | Locale chunks split out of the main bundle | yes — per-locale `assets/<lang>-*.js` (437 files total) |
 | All three compose files parse | `podman compose config` OK for `dokploy`, `dokploy.registry`, `dokploy-bundled` |
-| API entrypoint dependency wait | `postgres reachable` / `redis reachable`, then migrations start |
+| API entrypoint dependency wait | phases 1-4 run, then migrations start — see "A note on the migration connection probe" |
 | API full migration on this host | **blocked** — see "A note on the migration connection probe"; podman/macOS only |
 | Image-level `HEALTHCHECK` under podman | dropped by the default OCI format; present with `--format docker` |
 | Building `Dockerfile.dashboard` with **no** target (before the guard) | exit 0, silently produced a byte-identical **vendor** image |
@@ -539,53 +539,161 @@ Covers the two-target dashboard split and the compose/CI changes that followed i
 ## A note on the migration connection probe
 
 Before migrating, Medusa races a `SELECT 1` against a timer
-(`MEDUSA_DB_MIGRATION_CONNECTION_TIMEOUT`, default 10000 ms) and aborts with
-"Could not connect to the database while running migrations … usually indicates
-an incorrect database URL or an SSL configuration issue."
+(`MEDUSA_DB_MIGRATION_CONNECTION_TIMEOUT`, default 10000 ms;
+`deploy/dokploy/env/api.env.example` sets 30000):
 
-That message is a guess, not a diagnosis. While validating the split-services
-topology locally (podman on macOS, containers on a user-defined bridge) it fired
-**even though the database was fully reachable** — the same image had already
-connected and created the `mikro_orm_migrations` table moments earlier, and
-direct `pg` (8 ms), `knex` (11 ms), 80 concurrent connections (55 ms), 1 MB
-result sets and Redis round-trips all succeeded on that same network. The
-identical image and configuration migrated a fresh database successfully on host
-networking in 20 s.
-
-So if you hit it, **check reachability before believing the message**:
-
-```bash
-# from a shell in the API container
-node -e "new (require('/app/node_modules/pg').Client)({connectionString:process.env.DATABASE_URL}).connect().then(()=>console.log('db ok'))"
+```js
+await Promise.race([knex.raw("SELECT 1"), timeout])
 ```
 
-If that succeeds, the probe is the problem, not your URL — raise
-`MEDUSA_DB_MIGRATION_CONNECTION_TIMEOUT`. This was not reproduced on Docker under
-Linux, which is what Dokploy runs.
+**The message you get when that timer wins is a timer expiry, not a diagnosis.**
 
-**Raising the timeout does not always clear it under podman on macOS.** Re-tested
-2026-09-15 on podman 6.1.0 (applehv, 8 vCPU) with the API, Postgres 16 and Redis 7
-on a user-defined bridge. At the documented `30000` the run aborted with the
-generic "incorrect database URL or an SSL configuration issue" message. Raising it
-to `300000` on a freshly created database did **not** let the migration through —
-it changed the failure instead:
+```
+Could not connect to the database while running migrations. The connection timed
+out after 30 seconds, which usually indicates an incorrect database URL or an SSL
+configuration issue.
+```
+
+The clause after "which usually indicates" is upstream's guess and it is wrong
+often enough to be actively harmful — it cost the 2026-09-16 incident a full
+diagnostic cycle. Read only the first sentence: `SELECT 1` neither resolved nor
+rejected within the window.
+
+This matters because `verifyMigrationConnection` has **two** branches, and they
+say different things:
+
+| What you see | What happened |
+|---|---|
+| `… while running migrations. The connection timed out after Ns …` | the **timer** won the race. Nothing answered. Every fast-failing cause is excluded. |
+| `… while running migrations: <driver message>.` | the **driver** rejected, and the driver message is the real cause. Read it literally. |
+
+If you get the timer form, these are all ruled out *by the shape of the message
+alone* — each of them rejects in milliseconds and produces the other branch
+(measured, 2026-09-16):
+
+| Ruled out by the timer message | How it actually reports |
+|---|---|
+| wrong password / wrong role | `28P01`, 12 ms |
+| wrong database name | `3D000`, 11 ms |
+| role lacks `CONNECT` | `42501`, 16 ms |
+| URL demands TLS, server has `ssl=off` | "server does not support SSL connections", 11 ms |
+| server demands TLS, URL offers none | `28000 no pg_hba.conf entry … no encryption`, 7 ms |
+| self-signed certificate | "self-signed certificate", 21 ms |
+| `max_connections` exhausted | `53300 sorry, too many clients already`, 10 ms |
+
+What is left is narrow: **something accepted the connection and then went
+silent** — a routing/ingress VIP or hung proxy that never speaks the wire
+protocol, a pooler queueing instead of refusing, or the client starving on knex
+pool acquisition / a blocked event loop.
+
+### This is NOT a macOS/podman-only effect
+
+An earlier revision of this document claimed the behaviour had only ever been
+seen under podman on macOS and never on Docker under Linux. **That claim is
+withdrawn.** The 2026-09-16 production outage on the Dokploy host (Docker, Linux)
+produced the identical message. Do not use "we run Linux" to dismiss it.
+
+The local podman/macOS observation still stands on its own terms: at `30000` the
+run aborts with the generic message, and raising it to `300000` changes the
+failure to
 
 ```
 Could not connect to the database while running migrations:
 Knex: Timeout acquiring a connection. The pool is probably full.
-  at verifyMigrationConnection (/app/node_modules/@medusajs/modules-sdk/dist/medusa-app.js:44)
 ```
 
-In both runs Medusa had already connected and created `mikro_orm_migrations`
-moments earlier, and `psql` against the same database succeeded throughout. So the
-probe is starving on *pool acquisition*, not on reachability, and the timeout knob
-only decides which of the two timers reports it. Treat a raised
-`MEDUSA_DB_MIGRATION_CONNECTION_TIMEOUT` as a diagnostic step, not a guaranteed
-fix, and fall back to host networking (which migrated a fresh database in 20 s) if
-you need a working migration locally.
+i.e. the stall is in **pool acquisition**, not reachability. That is the single
+most useful thing the 300000 experiment buys you.
 
-None of this has been observed on Docker under Linux. It blocks local end-to-end
-testing on macOS, not Dokploy deploys.
+### Reading the preflight report
+
+The old advice here — shell into the container and run `psql` or a one-line
+`node -e` — is **useless on the Dokploy host, which has no SSH**. Do not try it.
+The deploy log is the entire observability surface, so `entrypoint-api.sh` now
+prints a preflight report into it on **every** boot, healthy or not.
+
+Four phases, one line each on entry:
+
+```
+[preflight 1/4] environment
+[preflight 2/4] tcp reachability      (proves: a port is open. NOT that it is Postgres.)
+[preflight 3/4] postgres wire protocol
+[preflight 4/4] authenticated session
+```
+
+Every run prints exactly one verdict line. Grep the deploy log for
+`PREFLIGHT` first and nothing else:
+
+| Verdict token | What it means | Where to look |
+|---|---|---|
+| `PREFLIGHT OK` | a single `pg` client connected, authenticated and ran `SELECT 1` | see the caveat below — this does **not** clear the pool |
+| `PREFLIGHT FAIL: pg-driver-unavailable` | the `pg` driver is not in the image | build defect. `Dockerfile.api` asserts it at build time, so this should be unreachable |
+| `PREFLIGHT FAIL: dns` | the hostname does not resolve | the DB host in `DATABASE_URL` is wrong, or the service is not on the shared network |
+| `PREFLIGHT FAIL: tcp-unreachable` | nothing is listening | the port, the network attachment, or the service is down |
+| `PREFLIGHT FAIL: no-postgres-protocol-response` | **the port is open and nothing on it speaks Postgres.** The probe sent an 8-byte `SSLRequest` and got no byte back | a routing/ingress VIP, a stale service alias, or a hung proxy. This is the highest-value line in the report |
+| `PREFLIGHT FAIL: protocol-reset` | the port accepted, then hung up without a protocol byte | same class as above, different sub-case |
+| `PREFLIGHT FAIL: tls` | TLS posture mismatch or a stalled handshake | compare `sslmode=` and `protocol_reply=` on the lines above it |
+| `PREFLIGHT FAIL: auth` | `28P01` / `28000` | wrong password or role |
+| `PREFLIGHT FAIL: database-missing` | `3D000` | wrong database name in the URL |
+| `PREFLIGHT FAIL: server-connection-limit` | `53300` | `max_connections` exhausted |
+| `PREFLIGHT FAIL: auth-stall` | Postgres answered the wire probe, then never completed a session | a transaction-pooling proxy queueing, or a stalled backend |
+| `PREFLIGHT FAIL: driver` | anything else | the verbatim driver `code`/`name`/`message` is on the line above |
+
+The discriminator that matters most is `no-postgres-protocol-response` vs `tls`
+vs `auth-stall`. All three look identical to a plain "connect and run `SELECT 1`"
+probe — each is a promise that never settles — which is exactly why phase 3
+writes the raw `SSLRequest` and reads one byte before phase 4 ever runs.
+
+Supporting facts are printed on every boot, with the password redacted in both
+its decoded and its percent-encoded form:
+
+```
+  host= port= database= user= password=<set|EMPTY> sslmode=
+  dns=<ips> in <n>ms
+  tcp_connect_ms=  protocol_reply=<S|N|none>
+  connect_ms=  select1_ms=  server_version=  backends=<n>/<max_connections>
+```
+
+`protocol_reply=S` means the server offers TLS, `N` means it refuses it, `none`
+means it is not Postgres.
+
+**`PREFLIGHT OK` is not "the database is fine".** The probe uses a *single* `pg`
+client, so knex's pool is never exercised and it structurally cannot reproduce
+pool starvation — whose signature is precisely "preflight healthy, then Medusa
+times out anyway". The report says so in the log, on purpose. If you see
+`PREFLIGHT OK` followed by the migration timeout, the stall is **client-side**
+(knex pool acquisition or a blocked event loop) and re-investigating the network
+is wasted time.
+
+### Worst-case boot time
+
+Phase 2 retries for `WAIT_TIMEOUT` seconds (default 120) and phases 3+4 have
+their own separate budget of the same length, so a **fully broken database can
+keep the container silent for up to 2 × `WAIT_TIMEOUT` = 240 s before it exits
+non-zero**. The budget and that worst case are printed in the report itself. Set
+`WAIT_TIMEOUT` lower if you want faster feedback. Note the image `HEALTHCHECK`
+uses `--start-period=120s`, which governs routing only, not restarts — a boot
+longer than 120 s is not a hang.
+
+Retries are bounded and only applied where a retry can change the answer
+(`dns`, `tcp-unreachable`, `no-postgres-protocol-response`, `protocol-reset`,
+`auth-stall`, `server-connection-limit`). `auth`, `database-missing` and `tls`
+fail immediately — they will not fix themselves, and burning the budget on them
+only delays your diagnosis. Nothing here ever retries `medusa db:migrate`.
+
+### Phase 2 proves almost nothing — do not trust it
+
+Phase 2 is a raw `net.connect`. It used to print `postgres reachable`, and
+during the 2026-09-16 incident that line was the single biggest source of wasted
+diagnosis: it printed for **nine** distinct broken configurations, including a
+listener that was not Postgres at all. It now prints
+
+```
+  postgres: tcp port open (not authenticated, not identified as postgres)
+```
+
+It is kept because it is the only cross-Application startup ordering Dokploy
+offers (compose `depends_on` cannot span Applications). It is not evidence.
 
 ## Known upstream issues affecting deploys
 

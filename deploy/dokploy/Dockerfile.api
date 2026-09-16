@@ -128,6 +128,15 @@ WORKDIR /app
 COPY --from=build /repo/apps/api/.medusa/server ./
 RUN bun install --production --ignore-scripts
 
+# The entrypoint's preflight opens a real authenticated session with `pg`, and
+# it is mandatory-fatal. `pg` is only ever a TRANSITIVE dependency here
+# (@medusajs/framework -> @mikro-orm/postgresql -> knex -> pg) and this
+# --production install resolves differently from the build stage's, so its
+# presence at /app is an assumption that has to be proven once, here. If it ever
+# stops hoisting, this must break the BUILD — not every container start, which
+# would take down deploys whose database is perfectly healthy.
+RUN node -e "console.log('runtime pg =', require('pg/package.json').version, 'at', require.resolve('pg'))"
+
 COPY --from=build /repo/packages/core   /tmp/ws/core
 COPY --from=build /repo/packages/types  /tmp/ws/types
 COPY --from=build /repo/packages/client /tmp/ws/client
