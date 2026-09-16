@@ -621,8 +621,9 @@ Four phases, one line each on entry:
 [preflight 4/4] authenticated session
 ```
 
-Every run prints exactly one verdict line. Grep the deploy log for
-`PREFLIGHT` first and nothing else:
+Every run that reaches phase 3 prints exactly one verdict line. A run that dies
+earlier — a missing `DATABASE_URL` or `REDIS_URL` — prints the phase-1 banner and
+no verdict token. Grep the deploy log for `PREFLIGHT` first and nothing else:
 
 | Verdict token | What it means | Where to look |
 |---|---|---|
@@ -632,8 +633,9 @@ Every run prints exactly one verdict line. Grep the deploy log for
 | `PREFLIGHT FAIL: tcp-unreachable` | nothing is listening | the port, the network attachment, or the service is down |
 | `PREFLIGHT FAIL: no-postgres-protocol-response` | **the port is open and nothing on it speaks Postgres.** The probe sent an 8-byte `SSLRequest` and got no byte back | a routing/ingress VIP, a stale service alias, or a hung proxy. This is the highest-value line in the report |
 | `PREFLIGHT FAIL: protocol-reset` | the port accepted, then hung up without a protocol byte | same class as above, different sub-case |
-| `PREFLIGHT FAIL: tls` | TLS posture mismatch or a stalled handshake | compare `sslmode=` and `protocol_reply=` on the lines above it |
-| `PREFLIGHT FAIL: auth` | `28P01` / `28000` | wrong password or role |
+| `PREFLIGHT FAIL: tls` | TLS posture mismatch or a stalled handshake. A `pg_hba` rejection counts as TLS **only** when the wire probe replied `S` | compare `sslmode=` and `protocol_reply=` on the lines above it |
+| `PREFLIGHT FAIL: auth` | `28P01`, or a `28000` that is not a `pg_hba` rejection | wrong password or role |
+| `PREFLIGHT FAIL: pg-hba-rejected` | `28000` `no pg_hba.conf entry`, and the server did **not** offer TLS | no `host` rule covers this client's IP/user/database. An access-control omission, **not** a TLS problem — postgres appends `, no encryption` to every `pg_hba` rejection, so that phrase alone means nothing |
 | `PREFLIGHT FAIL: database-missing` | `3D000` | wrong database name in the URL |
 | `PREFLIGHT FAIL: server-connection-limit` | `53300` | `max_connections` exhausted |
 | `PREFLIGHT FAIL: auth-stall` | Postgres answered the wire probe, then never completed a session | a transaction-pooling proxy queueing, or a stalled backend |

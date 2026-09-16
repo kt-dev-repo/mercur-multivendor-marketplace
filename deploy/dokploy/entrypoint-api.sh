@@ -12,8 +12,11 @@ set -e
 # name its own cause from the Dokploy log alone — there is no SSH on that host,
 # so the log is the entire observability surface.
 #
-# Exactly one line per run matches `PREFLIGHT OK` or `PREFLIGHT FAIL: <token>`.
-# The tokens are mutually exclusive and greppable; grep for that prefix first.
+# Every run that reaches phase 3 prints exactly one line matching `PREFLIGHT OK`
+# or `PREFLIGHT FAIL: <token>`. A run that dies earlier — a missing DATABASE_URL
+# or REDIS_URL — prints the phase-1 banner instead and no verdict token, so that
+# path stays byte-comparable with previous releases. The tokens are mutually
+# exclusive and greppable; grep for that prefix first.
 # ---------------------------------------------------------------------------
 
 echo "[preflight 1/4] environment"
@@ -183,9 +186,16 @@ const scrub = (text) => {
   return out
 }
 const say = (line) => { console.log(scrub(line)) }
+// Literal text this script authors itself is NEVER scrubbed. scrub() is a blind
+// substring replace, so a password that happens to be an ordinary word rewrites
+// the report's own vocabulary: with the password "postgres" — the commonest
+// credential there is — the verdict "no-postgres-protocol-response" came out as
+// "no-***-protocol-response" and the one line this whole instrument exists to
+// produce stopped being greppable. Values still go through say().
+const sayLiteral = (line) => { console.log(line) }
 const fail = (token, ...lines) => {
   for (const line of lines) say("  " + line)
-  say("  PREFLIGHT FAIL: " + token)
+  sayLiteral("  PREFLIGHT FAIL: " + token)
   process.exitCode = 1
   // A hung socket must never outlive the verdict.
   process.exit(1)
@@ -227,7 +237,7 @@ try {
 }
 const sslmode = url.searchParams.get("sslmode") || url.searchParams.get("ssl") || "none"
 
-say("[preflight 3/4] postgres wire protocol")
+sayLiteral("[preflight 3/4] postgres wire protocol")
 say("  host=" + host)
 say("  port=" + port)
 say("  database=" + (database || "<empty>"))
@@ -348,17 +358,23 @@ const openSession = (pg) => new Promise((resolve) => {
 })
 
 // Mutually exclusive by construction: the first matching rule wins and returns.
-const classify = (err) => {
+const classify = (err, wireByte) => {
   const code = err.code || ""
   const message = err.message || ""
   const looksTls = /\bssl\b|\btls\b|certificate|self-signed|no encryption/i.test(message)
   if (code === "3D000") return "database-missing"
   if (code === "53300") return "server-connection-limit"
   if (code === "28P01") return "auth"
-  // 28000 covers both "no pg_hba.conf entry ... no encryption" (a TLS posture
-  // mismatch) and genuine authorisation refusals. Reporting the former as
-  // "auth" would send the reader after credentials that are correct.
-  if (code === "28000") return looksTls ? "tls" : "auth"
+  // 28000 is BOTH "no pg_hba.conf entry ..." and other authorisation refusals.
+  // The message is NOT a TLS discriminator: postgres appends the encryption
+  // state to EVERY pg_hba rejection (", no encryption" / ", SSL encryption"),
+  // so matching on those words reported a plain missing host rule as a TLS
+  // problem on a server with SSL off and no hostssl line at all. Only the wire
+  // probe knows whether TLS was ever on offer.
+  if (code === "28000") {
+    if (!/no pg_hba\.conf entry/i.test(message)) return "auth"
+    return wireByte === "S" ? "tls" : "pg-hba-rejected"
+  }
   if (code === "ENOTFOUND" || code === "EAI_AGAIN") return "dns"
   if (code === "ECONNREFUSED" || code === "EHOSTUNREACH" || code === "ENETUNREACH") return "tcp-unreachable"
   if (!code && looksTls) return "tls"
@@ -466,10 +482,10 @@ const run = async () => {
         "the server refuses TLS and the URL demands it: drop sslmode, or enable TLS on the server")
     }
 
-    say("[preflight 4/4] authenticated session")
+    sayLiteral("[preflight 4/4] authenticated session")
     const session = await openSession(driver.pg)
     if (!session.ok) {
-      const token = classify(session)
+      const token = classify(session, wire.byte)
       const detail = [
         "code=" + (session.code || "(none)") + " name=" + session.name
           + (session.severity ? " severity=" + session.severity : ""),
@@ -499,7 +515,7 @@ const run = async () => {
       say("  server_version=unknown")
       say("  backends=unknown/unknown (" + session.factsError + ")")
     }
-    say("  PREFLIGHT OK")
+    sayLiteral("  PREFLIGHT OK")
     // Without this sentence PREFLIGHT OK becomes the new "postgres reachable".
     // The probe uses ONE pg client, so knex's pool is never exercised and this
     // result cannot exonerate pool starvation or a blocked event loop.

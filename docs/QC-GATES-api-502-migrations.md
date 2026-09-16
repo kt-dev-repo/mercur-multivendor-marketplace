@@ -351,3 +351,233 @@ C2 signature (V0 followed by a Medusa timeout):
 - **Dev:** §1 is the output contract, §2 the correctness rules, §3 the regression surface.
   Read §0 first — two of the PO's premises need work you would otherwise skip.
 - **QC pass 2:** re-run every scenario independently; do not accept a self-report.
+
+---
+
+# QC pass 2 — final review
+
+Reviewed commit `de0db2811` *fix(deploy): make the api preflight name its own failure
+instead of guessing* (4 files: `deploy/dokploy/{entrypoint-api.sh,Dockerfile.api,README.md,env/api.env.example}`).
+Everything below was re-run by QC against the committed script mounted over
+`localhost/mercur-api:qc`; the dev's self-report was not taken on trust. Logs in
+`/tmp/repro502/qc2/`.
+
+**VERDICT: REJECT** — two required code changes, both small. Details in §V3 and §V1.
+Everything else passes, including the core V4/V6/V10 discriminator.
+
+## Gate results
+
+| Gate | Result | Evidence |
+|---|---|---|
+| G1 `pg` resolves in the built image | **PASS** | `podman run --entrypoint node mercur-api:qc -e "require.resolve('pg')"` → `/app/node_modules/pg/lib/index.js` 8.23.0 |
+| G2 build-time assertion | **PASS** | `Dockerfile.api:138` `RUN node -e "...require('pg/package.json')..."` after the `--production` install |
+| G3 no new dependency | **PASS** | commit touches 4 files; no `package.json`/`bun.lock`/`apt-get` |
+| G4 one extra node process | **PASS** | phases 3+4 share one `node "$PREFLIGHT_JS"` (`entrypoint-api.sh:525`); the two `wait_for` nodes are pre-existing |
+| G5 raw SSLRequest phase | **PASS (byte-verified)** | listener on 55435 logged `RECEIVED_HEX=0000000804d2162f len=8`. `S`→ TLS offered (E2), `N`→ refused (E), no byte → V4 (B) |
+| G6 healthy-boot budget ≤ 2.0 s | **PASS** | 3 runs each, container start → `→ Running migrations`: new 0.19/0.18/0.19 s, pre-change script 0.15/0.14/0.15 s → **+0.04 s**. Caveat: measured on Apple Silicon, not the 3-vCPU host; structurally it is one extra node cold start, so the host figure should be ~0.2-0.4 s, still far inside budget |
+| G7 handoff sentence | **PASS** | scenario A, `entrypoint-api.sh:506-509`; printed immediately after `PREFLIGHT OK`, names knex's pool explicitly |
+| G8 no credential in log/argv | **PASS** | `wait_for` now passes the URL via `WAIT_URL=` env and only the numeric timeout on argv (`:92`); the preflight reads `process.env.DATABASE_URL` itself. Scenario F (`p@ss/w0rd-SECRET`): `grep -F SECRET`, `-F p%40ss`, `-F w0rd` all 0 across the healthy, driver-error and unparseable-URL paths |
+| G9 never sets `MEDUSA_DB_MIGRATION_CONNECTION_TIMEOUT` | **PASS** | `grep -c` → 0 |
+| G10 bounded retry | **PASS** | budget `max(5, WAIT_TIMEOUT)*1000`; every retry gated on `remaining()`. B exited at 22 s of a 25 s budget; E2 at 10 s of 20 s. No `while true` on migrate |
+| G11 exit semantics | **PASS** | B/C/D/E/E2/H/I all exit non-zero; no `|| true` on the preflight; the `if node …; else … exit 1` form is `set -e`-safe and still fatal |
+| G12 POSIX sh | **PASS** | `sh -n` clean, `dash -n` (debian:bookworm-slim) clean, `shellcheck -s sh` **clean, zero warnings** |
+| G13 worst case stated | **PASS** | in the report (`budget=…; worst case boot is 2 x WAIT_TIMEOUT = 240s`) and in `README.md:668-675` |
+| G14 no discarded diagnosis | **PASS** | the three `catch {}` sites are `client.end()` after a diagnosis already captured, or percent-decoding fallbacks that `say()` a note. No `process.exit(0)` on an error path |
+
+| Regression | Result | Evidence |
+|---|---|---|
+| R1/R2 `WAIT_TIMEOUT` semantics | **PASS** | scenario H (`WAIT_TIMEOUT=6`, closed port 55999): `PREFLIGHT FAIL: tcp-unreachable`, `code=ECONNREFUSED after 6s (budget 6s)`, wall 6 s |
+| R3 missing-env block unchanged | **PASS** | scenario I: identical banner, env **names** only, exit 1. Only diff in that region is the comment header (`git show` shows one `-` line, a comment) |
+| R4 redis/seed/admin/`exec start` untouched | **PASS** | the commit's only deletions are the 9 `wait_for`/label lines |
+| R5 healthy boot identical + end-to-end | **PASS** | scenario A ran to `Migrations completed` and `Server is ready on port: 9000` |
+| R6 compose/HEALTHCHECK/EXPOSE/PORT | **PASS** | not in the commit |
+| R7/R10 no upstream file touched | **PASS** | `git diff --diff-filter=MDR --name-only a925daf62…` empty; all 4 files absent from the merge-base tree (LOCAL) |
+| R8 no overlay for LOCAL files | **PASS** | `deploy/overlays` untouched |
+| R11 no scope creep | **PASS** | no seed/admin/BUILD_JOBS/compose/F5 changes |
+
+| Scenario | Expected | Observed | |
+|---|---|---|---|
+| A healthy | `PREFLIGHT OK` + facts + handoff | as specified, then migrations + server ready | PASS |
+| B blackhole (C1) | `no-postgres-protocol-response` | token emitted, `tcp_connect_ms=1`, `protocol_reply=none`, `socket still open` | PASS (token string corrupted — see V3) |
+| C wrong password | `auth` + `28P01` | `code=28P01 name=error severity=FATAL` | PASS |
+| D missing db | `database-missing` + `3D000` | `code=3D000` | PASS |
+| E sslmode mismatch | `tls`, `sslmode=require`, `protocol_reply=N` | all three | PASS |
+| E2 answers `S` then stalls | `auth-stall`/`tls`, **not** V4 | `auth-stall`, `protocol_reply=S received at 2ms, then no session within 10s` | PASS |
+| F redaction | no `SECRET`, no `p%40ss` | 0 matches on all paths | PASS |
+| G shell conformance | clean | `sh -n`/`dash -n`/`shellcheck` clean | PASS |
+| H `WAIT_TIMEOUT=6` | 6-10 s, `tcp-unreachable` | 6 s | PASS |
+| I missing env | banner unchanged, exit 1 | unchanged | PASS (no token — see V2) |
+| K invariant | empty | empty | PASS |
+| L-P runbook | see below | see below | PASS with two corrections |
+
+F4: **L** PASS (falsified Linux claim gone). **M** PASS (`README.md:585-606` names the timer
+expiry and points at the token table). **N** PASS (`README.md:610-611` explicitly marks the
+`psql`/`node -e` advice useless without SSH). **O** PASS (`MEDUSA_DB_MIGRATION_CONNECTION_TIMEOUT=30000`
+active; 300000 documented as a one-shot diagnostic, "never a shipped default"; no
+`^MEDUSA_DB_MIGRATION_CONNECTION_TIMEOUT=300000`). **P** PASS (full token table at
+`README.md:625-640`) — with two factual corrections required, listed in V1 and V2.
+
+§5's `bun run lint`/`bun run build` clause: **not re-run**, and I am saying so rather than
+claiming it. The change set contains no TypeScript, JSON or package manifest — it is four
+deploy files — so neither task's input changed. That is verifiable from the commit's file
+list; it is not a measurement.
+
+## Rulings on the three flagged deviations
+
+### V1. `28000` split between `tls` and `auth` — **REJECTED as implemented** (the idea is right, the discriminator is not)
+
+Dev's premise is correct: `28000` is what a TLS-requiring server returns, and calling that
+`auth` sends the reader after credentials that are fine. The split should exist.
+
+The message-shape heuristic does not implement it. `entrypoint-api.sh:354` tests
+`/\bssl\b|\btls\b|certificate|self-signed|no encryption/i` against the driver message.
+PostgreSQL appends the connection's encryption state to **every** `pg_hba.conf`-class
+`28000`, whatever the cause — `, no encryption` / `, SSL encryption` on PG 14+, `, SSL off` /
+`, SSL on` before that. So the regex matches essentially all of them.
+
+Measured, not argued. I added a role with no matching `host` line on a server with **SSL
+entirely off and no `hostssl` rule anywhere**, i.e. a pure host-based-access omission with
+no TLS involved:
+
+```
+  code=28000 name=error severity=FATAL
+  no pg_hba.conf entry for host "10.89.4.8", user "qctls", database "mercur", no encryption
+  PREFLIGHT FAIL: tls
+```
+
+A second, independent reproduction fell out of a broken `pg_hba.conf` file permission
+during the same session (`/tmp/repro502/qc2/F2.log`): same `28000`, same `tls` verdict, and
+the report on the two lines above it reads `sslmode=none protocol_reply=N` — the README's
+own advice for `tls` ("compare `sslmode=` and `protocol_reply=`") yields a contradiction.
+
+This is not a marginal false positive. On a managed Postgres — which is the deployment shape
+this runbook is written for — a source-network or per-user `pg_hba` restriction is *more*
+likely than a TLS posture mismatch. Dev has traded "TLS mismatch reported as auth" for
+"access-control failure reported as tls", at the same cost, and §1.2's mutual exclusivity
+(V6 vs V7) is not actually achieved.
+
+**Minimum change:** gate the `tls` branch on evidence that TLS is even possible. The wire
+byte is already known at the call site and is the free discriminator: a server that answered
+`N` cannot have a TLS posture problem. Pass `wire.byte` into `classify` and make `28000`:
+
+- `protocol_reply=S` **and** a TLS-shaped message → `tls`;
+- message matches `/pg_hba\.conf/i` and `protocol_reply=N` → **not** `tls` and not `auth`;
+  this is host-based-access, and it deserves its own token (the verbatim message is already
+  printed, so the token only has to stop pointing at the wrong subsystem);
+- otherwise → `auth`.
+
+Also correct `README.md:636`, which still documents `28000` under `auth` and so contradicts
+the shipped code in either direction.
+
+### V2. Zero verdict tokens on the missing-`DATABASE_URL` path — **ACCEPTED, with a required one-line correction**
+
+Dev weighed R3 (byte-comparable missing-env block) against §1.2's "exactly one line per run"
+and kept R3. That is the right call on the merits: the banner is better output for a human
+than a token, and R3 was an explicit gate.
+
+But the claim is now false in two places that a responder will read as contract:
+`entrypoint-api.sh:15` ("Exactly one line per run matches…") and `README.md:624` ("Every run
+prints exactly one verdict line"). Confirmed by measurement — scenario I emits **zero** lines
+matching `^ *PREFLIGHT (OK|FAIL:)`. A responder who greps token-first on a missing-env boot
+gets nothing and has no way to tell "the preflight never ran" from "the log was truncated".
+
+Take dev's own offer: append `  PREFLIGHT FAIL: environment` as the last line before the
+`exit 1`. It is additive, so R3 still holds byte-for-byte for everything above it, it keeps
+grep-first triage honest, and it makes the token set 13. If instead the token is not added,
+both sentences above must be reworded — silently leaving them is not an option.
+
+### V3. `database=`/`user=` redacted when they equal the password — **REJECTED; the defect is substantially worse than dev characterised it**
+
+Dev framed this as a cosmetic loss on a degenerate local DB. It is not. `scrub()`
+(`entrypoint-api.sh:180-185`) is a blind `split/join` applied to **every** emitted line —
+including the literal report skeleton and the verdict token itself. The password is not
+merely hidden where it appears as a value; it is deleted from static text that never
+contained a secret.
+
+Measured with `postgres://postgres:postgres@…`, the most common Postgres credential pair in
+existence and the one this workspace's own database uses:
+
+```
+[preflight 3/4] *** wire protocol
+  the port is open but nothing on it speaks the *** wire protocol:
+  PREFLIGHT FAIL: no-***-protocol-response
+```
+
+`grep -c 'PREFLIGHT FAIL: no-postgres-protocol-response'` → **0**. The token documented in
+`README.md:633` cannot be found in the log that emits it. With a short password the damage is
+total — password `p` produced `PREFLIGHT FAIL: no-***ostgres-***rotocol-res***onse` and
+shredded all 20 report lines (`/tmp/repro502/qc2/B.log`).
+
+This defeats the deliverable of the whole cycle. §1.2 requires greppable, mutually exclusive
+tokens; after scrubbing, the token is neither greppable nor guaranteed distinct — two
+different tokens can collapse to the same string for an adversarial password. §6 R3 fires.
+
+Dev's reasoning — "the scrubber cannot know which occurrence is the password" — is correct
+about **values** and irrelevant to **literals**. The script authors every literal it prints
+and knows for certain that `"  PREFLIGHT FAIL: "`, `"[preflight 3/4] postgres wire protocol"`
+and the token vocabulary contain no secret. Scrubbing them buys nothing and costs the report.
+
+**Minimum change:** never pass literal text through `scrub`. Scrub only interpolated values —
+a `v(x)` helper applied at each interpolation point, with the whole-line scrub retained only
+for driver-supplied strings (`err.message`, `factsError`). The non-negotiable subset, if the
+full refactor is judged too large during an outage: the verdict line and the four phase
+headers must be emitted unscrubbed. Both are closed-vocabulary constants, so G8 is unaffected
+— scenario F must still show 0 matches for `SECRET`, `p%40ss` and `w0rd` afterwards.
+
+The `database=`/`user=` masking dev actually asked about then becomes the residual, and in
+that form it **is** acceptable: those two lines interpolate real URL-derived values, the
+scrubber genuinely cannot tell them apart from the password, and erring toward redaction is
+right. It is also self-explaining next to `password=set`.
+
+## Minimum change required to ship
+
+1. V3 — stop scrubbing literal text; at minimum emit the verdict line and phase headers
+   unscrubbed. Re-run scenario F to confirm no leak, and scenario B with
+   `postgres://postgres:postgres@…` to confirm the token greps.
+2. V1 — gate the `28000` → `tls` branch on `protocol_reply=S`; give the `pg_hba` case its own
+   token; fix `README.md:636`.
+3. V2 (strongly recommended, one line) — emit `PREFLIGHT FAIL: environment` before the
+   missing-env `exit 1`, or reword `entrypoint-api.sh:15` and `README.md:624`.
+
+Nothing else needs to change. Everything in §2, §3 and §4 other than the above is verified
+passing, and the V4/V6/V10 discriminator — the reason this cycle exists — works: B, E and E2
+produce three different verdicts from three failures that a plain `SELECT 1` probe cannot
+tell apart.
+
+## Recorded, not acted on (out of scope)
+
+- **`CLAUDE.local.md`'s "the API cannot finish migrations under podman on macOS" is
+  falsified.** Independently reproduced by QC in scenario A: preflight → `Running
+  migrations` → `Migrations completed` → `Server is ready on port: 9000` (log
+  `/tmp/repro502/qc2/A.log:310`). Caveat: this was with `--network host` against a
+  published `mercur-postgres`; the original claim may still hold for the default bridge
+  network path. The note needs correcting with that qualifier, in a separate change.
+- **`deploy/dokploy/README.md:530`** still reports "API full migration on this host |
+  **blocked**". Same falsification, same caveat. Not touched here because it is outside the
+  F3/F4 scope this cycle gated.
+
+## Minor observations (not gates, no action required)
+
+- `entrypoint-api.sh:529` prints `see the PREFLIGHT FAIL token above` on stderr. It does not
+  match `^ *PREFLIGHT (OK|FAIL:)`, so the contract holds, but a naive
+  `grep -F 'PREFLIGHT FAIL'` counts two lines.
+- `TMPDIR` pointing at a non-existent directory makes `cat > "$PREFLIGHT_JS"` fail with a
+  raw shell error and exit 2, no verdict token. `TMPDIR` is unset in the image, so `/tmp` is
+  always used; honest failure, low value to harden.
+- The temp file is removed on **both** the success and failure branches (`:526`, `:528`), but
+  not on a signal — a `SIGTERM` mid-probe leaves `/tmp/mercur-preflight.js` behind in a
+  container that is being destroyed anyway. Harmless.
+- `/tmp` is `drwxrwxrwt` and the entrypoint runs as uid 0, so `cat >` through a pre-planted
+  symlink would be a root write primitive. Not exploitable today: no unprivileged process
+  exists in the container before the entrypoint and nothing mounts a shared `/tmp`. It stops
+  being true the moment someone adds a non-root user or a shared tmp volume — `mktemp` or an
+  `rm -f` before the redirect would close it permanently.
+
+## Environment restored
+
+`mercur-postgres` and `mercur-redis` are the only containers running. The probe roles
+`qctls` and `qcsec` are dropped, `pg_hba.conf` is back to its original content **and** its
+original `postgres:postgres 0600` ownership (a `sed -i` during the V1 test left it root-owned
+and unreadable by the server; that is what produced the second `28000` reproduction, and it
+has been repaired and reverified with a live authenticated connection). Both blackhole
+listeners are killed.
